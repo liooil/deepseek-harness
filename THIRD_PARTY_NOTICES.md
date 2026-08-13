@@ -50,6 +50,7 @@ External packages that a workspace package resolves at runtime. The tier covers 
 | [`@tanstack/react-virtual`](https://github.com/TanStack/virtual) | MIT |
 | [`@types/mdast`](https://github.com/DefinitelyTyped/DefinitelyTyped) | MIT |
 | [`@vscode/ripgrep`](https://github.com/microsoft/vscode-ripgrep) | MIT |
+| [`@zip.js/zip.js`](https://github.com/gildas-lormeau/zip.js) | BSD-3-Clause |
 | [`anser`](https://github.com/IonicaBizau/anser) | MIT |
 | [`bundesk`](https://github.com/liooil/bundesk) | MIT |
 | [`chokidar`](https://github.com/paulmillr/chokidar) | MIT |

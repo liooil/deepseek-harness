@@ -1,0 +1,209 @@
+# Build the desktop app natively so the embedded Node runtime and native
+# dependencies match each target. Every retained artifact contains exactly one
+# executable; a protected manual run from desktop-v<version> publishes all six.
+name: Release (desktop)
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish all six executables to a GitHub Release. Must run from desktop-v<version>.
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  PRIMARY_NODE_VERSION: '24'
+  BUN_VERSION: '1.3.14'
+  DSH_TELEMETRY_DISABLED: '1'
+
+jobs:
+  build:
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-x64
+            runner: ubuntu-24.04
+            output: dsh-desktop-linux-x64
+          - target: linux-arm64
+            runner: ubuntu-24.04-arm
+            output: dsh-desktop-linux-arm64
+          - target: windows-x64
+            runner: windows-2025
+            output: dsh-desktop-windows-x64.exe
+          - target: windows-arm64
+            runner: windows-11-arm
+            output: dsh-desktop-windows-arm64.exe
+          - target: macos-x64
+            runner: macos-15-intel
+            output: dsh-desktop-macos-x64
+          - target: macos-arm64
+            runner: macos-15
+            output: dsh-desktop-macos-arm64
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@v4
+        with:
+          dest: ${{ runner.temp }}/setup-pnpm
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.PRIMARY_NODE_VERSION }}
+          cache: pnpm
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Install (immutable)
+        run: pnpm install --frozen-lockfile
+
+      # The deploy step runs package install scripts again. The builder restores
+      # this source add-on afterward so the release keeps a glibc 2.28 floor.
+      - name: Rebuild Linux node-pty against manylinux 2.28
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          RUNNER_ARCH: ${{ runner.arch }}
+        run: |
+          set -euo pipefail
+          case "$RUNNER_ARCH" in
+            X64) image=quay.io/pypa/manylinux_2_28_x86_64 ;;
+            ARM64) image=quay.io/pypa/manylinux_2_28_aarch64 ;;
+            *) echo "::error::Unsupported Linux runner architecture $RUNNER_ARCH"; exit 1 ;;
+          esac
+          addon_dir="$(realpath packages/subprocess/subprocess-local/node_modules/node-pty)"
+          addon="$addon_dir/build/Release/pty.node"
+          [ -f "$addon_dir/build/Makefile" ] || {
+            echo "::error::node-pty install did not generate $addon_dir/build/Makefile"
+            exit 1
+          }
+          docker run --rm \
+            --user "$(id -u):$(id -g)" \
+            -v "$PWD:$PWD" \
+            -v "$HOME/.cache/node-gyp:$HOME/.cache/node-gyp:ro" \
+            -v "$RUNNER_TEMP/setup-pnpm:$RUNNER_TEMP/setup-pnpm:ro" \
+            -w "$addon_dir" \
+            "$image" \
+            bash -euxo pipefail -c \
+              'rm -rf build/Release && make -C build -j2 BUILDTYPE=Release'
+          [ -f "$addon" ] || { echo "::error::$addon missing after manylinux rebuild"; exit 1; }
+          readelf --version-info "$addon" > node-pty-glibc-versions.txt
+          maximum="$(sed -n 's/.*Name: GLIBC_\([0-9.]*\).*/\1/p' node-pty-glibc-versions.txt | sort -V | tail -1)"
+          [ -n "$maximum" ] || { echo "::error::No GLIBC requirements found in $addon"; exit 1; }
+          dpkg --compare-versions "$maximum" le 2.28 || {
+            echo "::error::node-pty addon requires GLIBC_$maximum but release claims glibc 2.28"
+            exit 1
+          }
+
+      - name: Build native single-file executable
+        run: pnpm run build:desktop-exe -- --target=${{ matrix.target }} --skip-build
+
+      - name: Smoke standalone runtime (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          product="dist-desktop/${{ matrix.output }}"
+          "$product" --version
+          "$product" --smoke --cwd "$PWD"
+
+      - name: Smoke standalone runtime (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $product = Join-Path dist-desktop '${{ matrix.output }}'
+          & $product --version
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & $product --smoke --cwd $PWD
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Ad-hoc sign macOS executable
+        if: runner.os == 'macOS'
+        shell: bash
+        run: codesign --force --sign - "dist-desktop/${{ matrix.output }}"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.output }}
+          path: dist-desktop/${{ matrix.output }}
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish GitHub Release
+    if: inputs.publish
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: dsh-desktop-*
+          path: dist
+          merge-multiple: true
+
+      - name: Authorize and validate release contents
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          REF_TYPE: ${{ github.ref_type }}
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./package.json').version")"
+          test "$REF_TYPE" = tag && test "$REF_NAME" = "desktop-v$version" || {
+            echo "::error::Publication must run from tag desktop-v$version."
+            exit 1
+          }
+          expected="$(mktemp)"
+          actual="$(mktemp)"
+          printf '%s\n' \
+            dsh-desktop-linux-arm64 \
+            dsh-desktop-linux-x64 \
+            dsh-desktop-macos-arm64 \
+            dsh-desktop-macos-x64 \
+            dsh-desktop-windows-arm64.exe \
+            dsh-desktop-windows-x64.exe > "$expected"
+          find dist -maxdepth 1 -type f -exec basename {} \; | sort > "$actual"
+          diff -u "$expected" "$actual"
+          cd dist
+          sha256sum dsh-desktop-* | sort -k2 > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Publish draft atomically
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          state="$(gh release view "$TAG" --json isDraft --jq .isDraft 2>/dev/null || true)"
+          if [ "$state" = false ]; then
+            echo "::error::Release $TAG is already published; refusing to replace its assets."
+            exit 1
+          fi
+          if [ -z "$state" ]; then
+            gh release create "$TAG" --verify-tag --draft \
+              --title "DeepSeek Harness Desktop ${TAG#desktop-v}" \
+              --notes "Single-file desktop executables for Linux, Windows, and macOS. Linux webview mode requires WebKit2GTK 4.1; Windows webview mode requires WebView2."
+          fi
+          gh release upload "$TAG" dist/* --clobber
+          gh release edit "$TAG" --draft=false

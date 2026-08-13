@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
 import { DESKTOP_HELP, parseDesktopArgs } from './args.ts'
-import { startDshWeb } from './dsh-web.ts'
+import { embeddedDshRuntimeVersion, startDshWeb } from './dsh-web.ts'
 import { openDesktopWindow, type DesktopWindow } from './window.ts'
 
 interface TerminationWatcher {
@@ -28,6 +28,8 @@ function waitForTerminationSignal(): TerminationWatcher {
 }
 
 async function readVersion(): Promise<string> {
+  const embeddedVersion = embeddedDshRuntimeVersion()
+  if (embeddedVersion) return embeddedVersion
   const manifest = await Bun.file(new URL('../package.json', import.meta.url)).json() as { version: string }
   return manifest.version
 }
@@ -43,8 +45,8 @@ async function runSmoke(url: URL): Promise<void> {
   console.info(`dsh-desktop: smoke check passed (${url})`)
 }
 
-async function main(): Promise<void> {
-  const options = parseDesktopArgs(Bun.argv.slice(2))
+export async function runDesktop(argv: string[]): Promise<void> {
+  const options = parseDesktopArgs(argv)
   if (options.help) {
     process.stdout.write(DESKTOP_HELP)
     return
@@ -90,7 +92,9 @@ async function main(): Promise<void> {
   }
 }
 
-void main().catch((error: unknown) => {
-  console.error(`dsh-desktop: ${error instanceof Error ? error.message : String(error)}`)
-  process.exitCode = 1
-})
+if (import.meta.main) {
+  void runDesktop(Bun.argv.slice(2)).catch((error: unknown) => {
+    console.error(`dsh-desktop: ${error instanceof Error ? error.message : String(error)}`)
+    process.exitCode = 1
+  })
+}

@@ -12,6 +12,8 @@ interface BunDeskRuntime {
   launchAppWindow(options: { appId: string; url: URL }): Promise<Bun.Subprocess | null>
 }
 
+let embeddedBunDesk: BunDeskRuntime | undefined
+
 interface WindowOptions {
   url: string
   title: string
@@ -23,6 +25,18 @@ interface WindowOptions {
 export interface DesktopWindow {
   readonly exited?: Promise<unknown>
   close(): void
+}
+
+export function configureBundeskRuntime(runtime: unknown): void {
+  embeddedBunDesk = runtime as BunDeskRuntime
+}
+
+async function resolveBunDeskRuntime(): Promise<BunDeskRuntime> {
+  if (embeddedBunDesk) return embeddedBunDesk
+  // BunDesk currently publishes Bun-native TypeScript. Keep dependency source
+  // behind this runtime boundary so the host does not re-check its internals.
+  const packageName: string = 'bundesk'
+  return await import(packageName) as BunDeskRuntime
 }
 
 async function openInProcessWindow(
@@ -78,11 +92,7 @@ async function openInProcessWindow(
 }
 
 export async function openDesktopWindow(url: URL, provider: DesktopProvider): Promise<DesktopWindow> {
-  // BunDesk currently publishes its Bun-native TypeScript source. Keep that
-  // implementation behind this small runtime boundary so the host's stricter
-  // TypeScript policy does not re-check dependency internals.
-  const packageName: string = 'bundesk'
-  const bundesk = await import(packageName) as BunDeskRuntime
+  const bundesk = await resolveBunDeskRuntime()
   const common = {
     url: String(url),
     title: 'DeepSeek Harness',

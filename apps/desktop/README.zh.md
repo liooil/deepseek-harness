@@ -2,14 +2,20 @@
 
 [English](README.md) | 中文
 
-本包是 DeepSeek Harness 的 BunDesk 桌面启动器。它会监管现有的 Node `dsh web` 进程，等待其稳定的回环就绪地址，然后在原生系统 webview 或独立浏览器窗口中打开该地址。
+本包是 DeepSeek Harness 的 BunDesk 桌面启动器。它会监管现有的 Node `dsh web` 进程，等待其稳定的回环就绪地址，然后在原生系统 webview 或独立浏览器窗口中打开该地址。GitHub Release 提供原生单文件可执行文件，其中嵌入了 Node.js、BunDesk、Web UI 和完整的 `dsh` 运行时。
 
 ## 要求
 
-- `Node.js` `^22.19.0` 或 `>=24.0.0` 用于运行 DeepSeek Harness。
-- [Bun](https://bun.sh) `>=1.3.14` 用于运行桌面启动器和 BunDesk。
+- Release 可执行文件不需要安装 Node.js、Bun 或 NPM 包。
+- 从源码运行需要 Node.js `^22.19.0` 或 `>=24.0.0`，以及 [Bun](https://bun.sh) `>=1.3.14`。
 - Windows webview 模式需要 WebView2 Runtime。
 - Linux webview 模式需要 WebKit2GTK 4.1 技术栈和显示服务器。
+
+## Release 可执行文件
+
+`Release (desktop)` GitHub Actions 工作流会在原生托管 runner 上构建 `dsh-desktop-{linux,windows,macos}-{x64,arm64}`。手动运行会将每个可执行文件分别保留为产物。发布运行只接受与仓库版本完全一致的 `desktop-v<repository-version>` 标签；它会检查六个文件全部存在、记录 `SHA256SUMS`、通过 GitHub Release 草稿上传，并在所有文件上传成功后公开 Release。
+
+首次执行会启动服务的命令时，程序会校验嵌入的归档文件，并将其解压到按内容寻址、仅属主可访问的用户缓存中。完整解压结果会被复用。解压过程拒绝不安全的归档路径，并通过原子重命名发布新的缓存目录，因此并发启动不会使用不完整的运行时。
 
 ## 从源码运行
 
@@ -44,6 +50,6 @@ Windows 和 Linux 默认使用 `webview`。macOS 默认使用 `browser`，因为
 
 ## 已知限制和延期工作
 
-- 启动器不是独立应用包：当前版本同时需要已发布的 `@deepseek-ai/dsh` 包，以及兼容的 Node.js 和 Bun 安装。
 - 当 BunDesk 回退到操作系统 URL 打开器时，它无法观察由外部管理的浏览器窗口何时关闭；请使用 `Ctrl+C` 停止服务。
-- 原生安装器、代码签名、自动更新和 macOS 进程内 webview 仍属于延期的打包工作。
+- Release 可执行文件同时携带 Bun 启动器和基于 Node 的 harness 闭包，因此下载文件和首次解压结果都比较大。
+- 工作流会对 macOS 可执行文件进行临时签名，但不使用 Apple Developer ID 或 Windows Authenticode 证书。原生安装器、受信任签名、自动更新和 macOS 进程内 webview 仍属于延期的打包工作。

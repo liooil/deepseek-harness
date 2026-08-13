@@ -51,6 +51,12 @@ importers:
       '@yarnpkg/cli-dist':
         specifier: 4.17.1
         version: 4.17.1
+      '@zip.js/zip.js':
+        specifier: ^2.8.26
+        version: 2.8.43
+      bundesk:
+        specifier: ^0.3.0
+        version: 0.3.0
       eslint-plugin-sonarjs:
         specifier: ^4.1.0
         version: 4.1.0(eslint@10.5.0(jiti@2.7.0))
@@ -358,6 +364,9 @@ importers:
       '@deepseek-ai/dsh':
         specifier: workspace:^
         version: link:../cli
+      '@zip.js/zip.js':
+        specifier: ^2.8.26
+        version: 2.8.43
       bundesk:
         specifier: ^0.3.0
         version: 0.3.0

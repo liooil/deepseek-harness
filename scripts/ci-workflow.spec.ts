@@ -371,6 +371,60 @@ describe('Python release workflows', () => {
   })
 })
 
+describe('Desktop release workflow', () => {
+  it('builds six native single-file targets and only publishes the complete tag set', () => {
+    const workflow = loadWorkflow('.github/workflows/desktop-release.yml')
+    const dispatch = workflowEvent(workflow, 'workflow_dispatch')
+    const build = workflowJob(workflow, 'build')
+    const publish = workflowJob(workflow, 'publish')
+    if (!isRecord(dispatch.inputs)
+      || !isRecord(dispatch.inputs.publish)
+      || !isRecord(build.strategy)
+      || !isRecord(build.strategy.matrix)
+      || !Array.isArray(build.strategy.matrix.include)
+      || !Array.isArray(build.steps)
+      || !Array.isArray(publish.steps)) {
+      throw new TypeError('Desktop release workflow must define its dispatch, matrix, and steps')
+    }
+
+    expect(dispatch.inputs.publish).toMatchObject({ type: 'boolean', default: false })
+    expect(build.strategy.matrix.include).toEqual([
+      { target: 'linux-x64', runner: 'ubuntu-24.04', output: 'dsh-desktop-linux-x64' },
+      { target: 'linux-arm64', runner: 'ubuntu-24.04-arm', output: 'dsh-desktop-linux-arm64' },
+      { target: 'windows-x64', runner: 'windows-2025', output: 'dsh-desktop-windows-x64.exe' },
+      { target: 'windows-arm64', runner: 'windows-11-arm', output: 'dsh-desktop-windows-arm64.exe' },
+      { target: 'macos-x64', runner: 'macos-15-intel', output: 'dsh-desktop-macos-x64' },
+      { target: 'macos-arm64', runner: 'macos-15', output: 'dsh-desktop-macos-arm64' },
+    ])
+    const buildSteps = build.steps.filter(isRecord)
+    const buildExecutable = buildSteps.find(step => step.name === 'Build native single-file executable')
+    const windowsSmoke = buildSteps.find(step => step.name === 'Smoke standalone runtime (Windows)')
+    const upload = buildSteps.find(step => step.uses === 'actions/upload-artifact@v7')
+    expect(buildExecutable).toMatchObject({
+      run: 'pnpm run build:desktop-exe -- --target=${{ matrix.target }} --skip-build',
+    })
+    expect(windowsSmoke).toMatchObject({ if: "runner.os == 'Windows'", shell: 'pwsh' })
+    expect(upload).toMatchObject({
+      with: {
+        name: '${{ matrix.output }}',
+        path: 'dist-desktop/${{ matrix.output }}',
+        'if-no-files-found': 'error',
+      },
+    })
+
+    expect(publish).toMatchObject({
+      if: 'inputs.publish',
+      needs: 'build',
+      permissions: { contents: 'write' },
+    })
+    const publication = JSON.stringify(publish.steps)
+    expect(publication).toContain('desktop-v$version')
+    expect(publication).toContain('SHA256SUMS')
+    expect(publication).toContain('gh release create')
+    expect(publication).toContain('gh release edit')
+  })
+})
+
 describe('Issue lifecycle workflow', () => {
   it('uses explicit review handoff events without rerunning when a draft becomes ready', () => {
     const lifecycle = loadWorkflow('.github/workflows/issue-lifecycle.yml')

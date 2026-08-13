@@ -1,15 +1,26 @@
 import { createRequire } from 'node:module'
 import { dirname, join, resolve } from 'node:path'
 import { extractDshWebUrl } from './readiness.ts'
+import { type EmbeddedDshRuntime, materializeDshRuntime } from './runtime-cache.ts'
 
 const STARTUP_TIMEOUT_MS = 60_000
 const SHUTDOWN_TIMEOUT_MS = 6_000
+
+let embeddedRuntime: EmbeddedDshRuntime | undefined
 
 export interface DshWebSession {
   readonly url: URL
   readonly exited: Promise<number>
   readonly exitCode: number | null
   stop(): Promise<number>
+}
+
+export function configureEmbeddedDshRuntime(runtime: EmbeddedDshRuntime): void {
+  embeddedRuntime = runtime
+}
+
+export function embeddedDshRuntimeVersion(): string | undefined {
+  return embeddedRuntime?.version
 }
 
 async function resolveDshBin(): Promise<string> {
@@ -20,6 +31,18 @@ async function resolveDshBin(): Promise<string> {
     throw new Error(`DeepSeek Harness is not built (${bin} is missing); run pnpm run build first`)
   }
   return bin
+}
+
+async function resolveDshCommand(): Promise<string[]> {
+  if (embeddedRuntime) {
+    const runtime = await materializeDshRuntime(embeddedRuntime)
+    if (runtime.extracted) console.info(`dsh-desktop: extracted embedded runtime to ${runtime.root}`)
+    return [runtime.node, runtime.dshBin]
+  }
+
+  const node = Bun.which('node')
+  if (!node) throw new Error('Node.js is required to run DeepSeek Harness')
+  return [node, await resolveDshBin()]
 }
 
 async function consumeLines(
@@ -64,11 +87,8 @@ function waitForExit(
 }
 
 export async function startDshWeb(options: { cwd: string; port: number }): Promise<DshWebSession> {
-  const node = Bun.which('node')
-  if (!node) throw new Error('Node.js is required to run DeepSeek Harness')
-
-  const bin = await resolveDshBin()
-  const subprocess = Bun.spawn([node, bin, 'web', '--port', String(options.port)], {
+  const command = await resolveDshCommand()
+  const subprocess = Bun.spawn([...command, 'web', '--port', String(options.port)], {
     cwd: resolve(options.cwd),
     env: process.env,
     stdin: 'ignore',

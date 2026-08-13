@@ -24,6 +24,7 @@
   },
   "dependencies": {
     "@deepseek-ai/dsh": "workspace:^",
+    "@zip.js/zip.js": "^2.8.26",
     "bundesk": "^0.3.0"
   },
   "devDependencies": {
