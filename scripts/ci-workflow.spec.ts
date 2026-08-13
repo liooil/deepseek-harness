@@ -397,12 +397,15 @@ describe('Desktop release workflow', () => {
       { target: 'macos-arm64', runner: 'macos-15', output: 'dsh-desktop-macos-arm64' },
     ])
     const buildSteps = build.steps.filter(isRecord)
+    const buildWorkspace = buildSteps.find(step => step.name === 'Build workspace')
     const buildExecutable = buildSteps.find(step => step.name === 'Build native single-file executable')
     const windowsSmoke = buildSteps.find(step => step.name === 'Smoke standalone runtime (Windows)')
     const upload = buildSteps.find(step => step.uses === 'actions/upload-artifact@v7')
+    expect(buildWorkspace).toMatchObject({ run: 'pnpm run build' })
     expect(buildExecutable).toMatchObject({
       run: 'pnpm run build:desktop-exe -- --target=${{ matrix.target }} --skip-build',
     })
+    expect(buildSteps.indexOf(buildWorkspace!)).toBeLessThan(buildSteps.indexOf(buildExecutable!))
     expect(windowsSmoke).toMatchObject({ if: "runner.os == 'Windows'", shell: 'pwsh' })
     expect(upload).toMatchObject({
       with: {
