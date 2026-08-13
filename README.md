@@ -34,6 +34,16 @@ pnpm run build
 pnpm dsh web
 ```
 
+### Run the desktop app from source
+
+The desktop launcher requires both `Node.js` and [Bun](https://bun.sh). Build the repository first, then run:
+
+```sh
+pnpm desktop
+```
+
+Windows and Linux use the system webview by default; macOS uses a dedicated browser window. Select either mode explicitly with `pnpm desktop --webview` or `pnpm desktop --browser`. See the [desktop launcher guide](apps/desktop/README.md) for requirements and options.
+
 ## Community and support
 
 - Feel free to submit feedback or bug reports through [GitHub Discussions](https://github.com/deepseek-ai/deepseek-harness/discussions).

@@ -34,6 +34,16 @@ pnpm run build
 pnpm dsh web
 ```
 
+### 从源码运行桌面应用
+
+桌面启动器同时需要 `Node.js` 和 [Bun](https://bun.sh)。请先构建仓库，然后运行：
+
+```sh
+pnpm desktop
+```
+
+Windows 和 Linux 默认使用系统 webview，macOS 默认使用独立浏览器窗口。可通过 `pnpm desktop --webview` 或 `pnpm desktop --browser` 显式选择任一模式。要求和选项详见[桌面启动器指南](apps/desktop/README.md)。
+
 ## 社区与支持
 
 - 欢迎通过 [GitHub Discussions](https://github.com/deepseek-ai/deepseek-harness/discussions) 提交反馈或 bug 报告。
