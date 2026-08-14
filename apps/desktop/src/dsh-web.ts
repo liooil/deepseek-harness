@@ -9,6 +9,7 @@ import { detectImage } from '@deepseek-ai/dsh-attachment-local/src/image.ts'
 import { configureRipgrepPath, resolveRgPath } from '@deepseek-ai/dsh-tool-fs-search/src/search-core.ts'
 import { verifyWorkflowWorkerEntry } from '@deepseek-ai/dsh-workflow-worker-thread'
 import { dlopen, FFIType } from 'bun:ffi'
+import { shouldPreloadSharpLibrary } from './native-library.ts'
 import { type EmbeddedDshRuntime, materializeDshRuntime } from './runtime-cache.ts'
 
 let embeddedRuntime: EmbeddedDshRuntime | undefined
@@ -66,9 +67,11 @@ async function resolveRuntime(): Promise<{
     process.env[key] = [nativeLibraryPath, process.env[key]].filter(Boolean).join(delimiter)
     const libraryName = (await readdir(nativeLibraryPath)).find(name => /vips.*\.(?:so(?:\.|$)|dylib$|dll$)/i.test(name))
     if (libraryName === undefined) throw new Error(`dsh-desktop: libvips library is missing from ${nativeLibraryPath}`)
-    sharpNativeLibrary ??= dlopen(join(nativeLibraryPath, libraryName), {
-      vips_init: { args: [FFIType.cstring], returns: FFIType.i32 },
-    })
+    if (shouldPreloadSharpLibrary(process.platform)) {
+      sharpNativeLibrary ??= dlopen(join(nativeLibraryPath, libraryName), {
+        vips_init: { args: [FFIType.cstring], returns: FFIType.i32 },
+      })
+    }
     const rgPlatform = process.platform === 'win32' ? 'win32' : process.platform
     configureRipgrepPath(resolve(
       packageRoot,
