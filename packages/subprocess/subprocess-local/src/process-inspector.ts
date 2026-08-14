@@ -357,6 +357,40 @@ class MacProcessInspector extends PosixProcessInspector {
 }
 
 /**
+ * Windows PTY sessions are owned by the backend rather than a POSIX-style
+ * inspectable process group. Returning no identities makes LocalTerminalHandle
+ * delegate root teardown to Bun.Terminal/node-pty while keeping foreground
+ * inspection explicitly unavailable.
+ */
+class BackendOwnedProcessInspector implements ProcessInspector {
+  foregroundPgid(_shellPid: number): number | undefined {
+    return undefined
+  }
+
+  isStdinWaiting(_pgid: number): boolean {
+    return false
+  }
+
+  processTree(_rootPid: number): ProcessIdentity[] {
+    return []
+  }
+
+  processSession(_sessionId: number): ProcessIdentity[] {
+    return []
+  }
+
+  isAlive(_identity: ProcessIdentity): boolean {
+    return false
+  }
+
+  signalGroup(_pgid: number, _signal: SubprocessTerminalSignal): void {
+    throw new Error('subprocess-local: terminal foreground signalling is unsupported on platform win32')
+  }
+
+  signalProcess(_identity: ProcessIdentity, _signal: 'SIGTERM' | 'SIGKILL'): void {}
+}
+
+/**
  * Create the supported platform inspector or fail at plugin load.
  * @param platform - target Node platform.
  * @param arch - target CPU architecture for Linux syscall numbers.
@@ -370,5 +404,6 @@ export function createProcessInspector(
 ): ProcessInspector {
   if (platform === 'linux') return new LinuxProcessInspector(arch, internals)
   if (platform === 'darwin') return new MacProcessInspector(internals)
+  if (platform === 'win32') return new BackendOwnedProcessInspector()
   throw new Error(`subprocess-local: terminal inspection is unsupported on platform ${platform}`)
 }

@@ -237,12 +237,31 @@ describe('macOS process inspector', () => {
     ])
   })
 
-  it('returns undefined for missing or invalid foreground groups and rejects unsupported platforms', () => {
+  it('returns undefined for missing or invalid foreground groups', () => {
     const fake = fakeInternals()
     fake.setTpgid('-1')
     expect(createProcessInspector('darwin', 'arm64', fake.internals).foregroundPgid(1)).toBeUndefined()
     fake.internals.exec = () => { throw new Error('gone') }
     expect(createProcessInspector('darwin', 'arm64', fake.internals).foregroundPgid(1)).toBeUndefined()
-    expect(() => createProcessInspector('win32', 'x64', fake.internals)).toThrow('unsupported on platform win32')
+  })
+})
+
+describe('Windows process inspector', () => {
+  it('delegates terminal lifetime to the PTY backend without inventing POSIX groups', () => {
+    const fake = fakeInternals()
+    const inspector = createProcessInspector('win32', 'x64', fake.internals)
+    expect(inspector.foregroundPgid(10)).toBeUndefined()
+    expect(inspector.isStdinWaiting(10)).toBe(false)
+    expect(inspector.processTree(10)).toEqual([])
+    expect(inspector.processSession(10)).toEqual([])
+    expect(inspector.isAlive({ pid: 10, started: 'unused' })).toBe(false)
+    expect(() => { inspector.signalGroup(10, 'SIGINT') }).toThrow('foreground signalling is unsupported')
+    inspector.signalProcess({ pid: 10, started: 'unused' }, 'SIGKILL')
+    expect(fake.kills).toEqual([])
+  })
+
+  it('still rejects platforms without a PTY ownership model', () => {
+    const fake = fakeInternals()
+    expect(() => { createProcessInspector('freebsd', 'x64', fake.internals) }).toThrow('unsupported on platform freebsd')
   })
 })
