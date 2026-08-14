@@ -259,7 +259,7 @@ class DesktopExecutableBuild {
       const manifest = JSON.parse(await readFile(resolve(root, path), 'utf8')) as WorkspaceManifest
       if (manifest.name) {
         manifests.set(manifest.name, manifest)
-        this.workspaceDirectories.set(manifest.name, dirnameOf(path))
+        this.workspaceDirectories.set(manifest.name, dirnameOfFs(path))
       }
     }
     this.workspaceManifests = manifests
@@ -476,11 +476,6 @@ function formatSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
-function dirnameOf(path: string): string {
-  const slash = path.lastIndexOf('/')
-  return slash < 0 ? '.' : path.slice(0, slash)
-}
-
 function conditionalExport(value: unknown): string | undefined {
   if (typeof value === 'string') return value
   if (value === null || typeof value !== 'object') return undefined
@@ -510,7 +505,7 @@ interface WorkspaceManifest {
   }
 }
 
-function dirnameOfFs(path: string): string {
+export function dirnameOfFs(path: string): string {
   const slash = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'))
   return slash < 0 ? '.' : path.slice(0, slash)
 }
