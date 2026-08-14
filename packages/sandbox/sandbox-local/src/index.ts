@@ -22,6 +22,7 @@
 
 import { spawnSync } from 'node:child_process'
 import { existsSync, mkdtempSync, rmSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -37,7 +38,9 @@ import { assertNever } from '@deepseek-ai/dsh-llm'
 import { SandboxProvider, SandboxUnavailableError } from '@deepseek-ai/dsh-sandbox'
 import type { ConfinedArgv, ConfinedSandboxMode, RunnerFailureRule, SandboxEnforcement, SandboxPolicy } from '@deepseek-ai/dsh-sandbox'
 import type { SessionId } from '@deepseek-ai/dsh-session'
-import { AclWriteGrant, assertTempRootOutsideWorkspace, tempWriteSid, workspaceWriteSid } from '@deepseek-ai/dsh-sandbox-windows-acl'
+import type { AclWriteGrant } from '@deepseek-ai/dsh-sandbox-windows-acl'
+import { assertTempRootOutsideWorkspace } from '@deepseek-ai/dsh-sandbox-windows-acl/src/path-boundary.ts'
+import { tempWriteSid, workspaceWriteSid } from '@deepseek-ai/dsh-sandbox-windows-acl/src/workspace-sid.ts'
 import { bwrapProfileArgs, landlockProfileArgs, seatbeltProfileArgs } from './profiles.ts'
 
 /** Plugin config. All optional — `static Config` supplies the defaults. */
@@ -145,6 +148,12 @@ interface AclTempCapability {
   dir: string
   writeSid: string
   grant: AclWriteGrant
+}
+
+function createAclWriteGrant(writeSid: string): AclWriteGrant {
+  const packageName: string = '@deepseek-ai/dsh-sandbox-windows-acl'
+  const runtime = createRequire(import.meta.url)(packageName) as { AclWriteGrant: typeof AclWriteGrant }
+  return runtime.AclWriteGrant.create(writeSid)
 }
 
 /**
@@ -393,7 +402,7 @@ export class LocalSandboxProvider extends SandboxProvider {
     assertTempRootOutsideWorkspace(workspaceRoot, tmpdir())
     const writeSid = workspaceWriteSid(workspaceRoot)
     if (!this.workspaceGrants.has(workspaceRoot)) {
-      const grant = AclWriteGrant.create(writeSid)
+      const grant = createAclWriteGrant(writeSid)
       try {
         grant.add(workspaceRoot, true)
       } catch (error) {
@@ -416,7 +425,7 @@ export class LocalSandboxProvider extends SandboxProvider {
     const tempSid = tempWriteSid(tempDir)
     let grant: AclWriteGrant | undefined
     try {
-      grant = AclWriteGrant.create(tempSid)
+      grant = createAclWriteGrant(tempSid)
       grant.add(tempDir)
     } catch (error) {
       const cleanupFailures: unknown[] = []

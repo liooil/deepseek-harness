@@ -34,15 +34,31 @@ async function readVersion(): Promise<string> {
   return manifest.version
 }
 
-async function runSmoke(url: URL): Promise<void> {
-  const response = await fetch(url, { signal: AbortSignal.timeout(30_000) })
+async function runSmoke(web: Awaited<ReturnType<typeof startDshWeb>>): Promise<void> {
+  const response = await fetch(web.url, { signal: AbortSignal.timeout(30_000) })
   if (!response.ok) throw new Error(`desktop smoke request failed with HTTP ${response.status}`)
   const contentType = response.headers.get('content-type') ?? ''
   if (!contentType.includes('text/html')) {
     throw new Error(`desktop smoke request expected text/html, received ${JSON.stringify(contentType)}`)
   }
-  await response.body?.cancel()
-  console.info(`dsh-desktop: smoke check passed (${url})`)
+  const html = await response.text()
+  if (!html.includes('window.__DSH_BOOT__')) throw new Error('desktop smoke: UI boot manifest is missing')
+  const paths = new Set<string>()
+  for (const match of html.matchAll(/"url":"([^"#]+)"/g)) {
+    const path = match[1]
+    if (path !== undefined) paths.add(path)
+  }
+  for (const match of html.matchAll(/(?:src|href)="([^"#]+)"/g)) {
+    if (match[1]?.startsWith('/')) paths.add(match[1])
+  }
+  if (paths.size === 0) throw new Error('desktop smoke: UI declares no client resources')
+  await Promise.all([...paths].map(async (path) => {
+    const asset = await fetch(new URL(path, web.url), { signal: AbortSignal.timeout(30_000) })
+    if (!asset.ok) throw new Error(`desktop smoke: UI resource ${path} returned HTTP ${asset.status}`)
+    await asset.body?.cancel()
+  }))
+  await web.verifyRuntime()
+  console.info(`dsh-desktop: smoke check passed (${web.url}; workers + sharp + ripgrep + terminal)`)
 }
 
 export async function runDesktop(argv: string[]): Promise<void> {
@@ -62,7 +78,7 @@ export async function runDesktop(argv: string[]): Promise<void> {
 
   if (options.smoke) {
     try {
-      await runSmoke(web.url)
+      await runSmoke(web)
     } finally {
       await web.stop()
     }

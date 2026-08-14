@@ -45,6 +45,11 @@ interface OutputLimitMessage {
   type: 'output-limit'
 }
 
+/** Worker -> host liveness tick used when the host cannot sample worker ELU (Bun). */
+interface HeartbeatMessage {
+  type: 'heartbeat'
+}
+
 /**
  * Worker → host: the program settled. `error` carries a program exception,
  * invalid completion, or output overflow (budgets, aborts, and substrate death
@@ -60,7 +65,7 @@ export interface DoneMessage {
 }
 
 /** Every message the worker sends. */
-export type WorkerToHost = CallMessage | LogMessage | OutputLimitMessage | DoneMessage
+export type WorkerToHost = CallMessage | LogMessage | OutputLimitMessage | HeartbeatMessage | DoneMessage
 
 /** Host → worker: the answer to one {@link CallMessage}. */
 export type ReplyMessage =

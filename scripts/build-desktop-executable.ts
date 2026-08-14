@@ -3,22 +3,19 @@
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { existsSync, globSync, statSync } from 'node:fs'
-import { chmod, copyFile, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { chmod, cp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
-import { basename, dirname, join, relative, resolve, sep } from 'node:path'
+import { join, relative, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { parseArgs } from 'node:util'
 import { BlobReader, BlobWriter, ZipWriter } from '@zip.js/zip.js'
-import { deployRuntimeClosure } from './runtime-deploy.ts'
 
 const root = resolve(import.meta.dirname, '..')
 const OUT_DIR = resolve(root, 'dist-desktop')
 const GENERATED_DIR = resolve(root, 'apps/desktop/generated')
 const GENERATED_ARCHIVE = join(GENERATED_DIR, 'runtime.zip')
-const DEPLOY_MANIFEST_DIR = resolve(root, 'apps/desktop-runtime-build')
+const GENERATED_PLUGIN_REGISTRY = join(GENERATED_DIR, 'plugin-registry.ts')
 const CLI_PACKAGE = '@deepseek-ai/dsh'
-const DEPLOY_PACKAGE = 'dsh-desktop-runtime-build'
-const ROOT_DOCS = ['README.md', 'README.zh.md', 'README.i18n.yaml']
 
 const TARGET_NAMES = [
   'linux-x64',
@@ -41,6 +38,27 @@ type BunCompileTarget =
 
 interface BunDeskBuildRuntime {
   buildDesktopApp(config: Record<string, unknown>): Promise<{ outfile: string; size: number; sha256: string }>
+}
+
+interface BunBuildResult {
+  readonly success: boolean
+  readonly logs: unknown[]
+}
+
+interface BunPluginBuilder {
+  onLoad(
+    options: { filter: RegExp },
+    loader: () => { contents: string; loader: 'js' },
+  ): void
+}
+
+interface BunBuildPlugin {
+  readonly name: string
+  setup(builder: BunPluginBuilder): void
+}
+
+declare const Bun: {
+  build(options: Record<string, unknown>): Promise<BunBuildResult>
 }
 
 class DesktopTarget {
@@ -115,6 +133,9 @@ function parseCli(argv: string[]): BuildCli {
 class DesktopExecutableBuild {
   private readonly stagingRoot: string
   private readonly dshRoot: string
+  private workspaceClosure: string[] = []
+  private workspaceManifests = new Map<string, WorkspaceManifest>()
+  private workspaceDirectories = new Map<string, string>()
 
   constructor(private readonly cli: BuildCli) {
     this.stagingRoot = join(OUT_DIR, '.staging', cli.target.name)
@@ -126,28 +147,106 @@ class DesktopExecutableBuild {
     if (!this.cli.skipBuild) await this.runCommand('build', pnpmBin(), ['run', 'build'])
     else console.log('build-desktop-executable: skipping pnpm run build (--skip-build)')
 
-    await this.createDeployManifest()
-    try {
-      await deployRuntimeClosure({
-        root,
-        staging: this.dshRoot,
-        packageFilter: DEPLOY_PACKAGE,
-        sourceNodeModules: join(DEPLOY_MANIFEST_DIR, 'node_modules'),
-        removeRootFiles: ROOT_DOCS,
-        dryRun: false,
-        logPrefix: 'build-desktop-executable',
-        run: (label, command, args) => this.runCommand(label, command, args),
-      })
-      await this.stageNodeRuntime()
-      await this.restoreLinuxPtyAddon()
-      const runtimeSha256 = await this.createRuntimeArchive()
-      await this.compile(runtimeSha256)
-    } finally {
-      await rm(DEPLOY_MANIFEST_DIR, { recursive: true, force: true })
-    }
+    await this.discoverRuntimeClosure()
+    await this.generatePluginRegistry()
+    await this.generateSharpRuntime()
+    await this.generateWorkerBundles()
+    await this.stageRuntimeData()
+    const runtimeSha256 = await this.createRuntimeArchive()
+    await this.compile(runtimeSha256)
   }
 
-  private async createDeployManifest(): Promise<void> {
+  private async generateSharpRuntime(): Promise<void> {
+    const platform = this.cli.target.platform === 'windows' ? 'win32' : this.cli.target.platform === 'macos' ? 'darwin' : 'linux'
+    await mkdir(GENERATED_DIR, { recursive: true })
+    await writeFile(join(GENERATED_DIR, 'sharp-runtime.ts'), [
+      "import sharp from 'sharp'",
+      'export default sharp',
+      '',
+    ].join('\n'))
+    console.log(`build-desktop-executable: generated native sharp entry for ${platform}-${this.cli.target.arch}`)
+  }
+
+  private async generateWorkerBundles(): Promise<void> {
+    await mkdir(GENERATED_DIR, { recursive: true })
+    for (const [name, entrypoint] of [
+      ['code-worker.js', 'packages/code-runtime/code-runtime-worker-thread/src/worker.ts'],
+      ['workflow-worker.js', 'packages/workflow/workflow-worker-thread/src/worker.ts'],
+    ] as const) {
+      const result = await Bun.build({
+        entrypoints: [resolve(root, entrypoint)],
+        outdir: GENERATED_DIR,
+        naming: name,
+        target: 'bun',
+        format: 'esm',
+        minify: true,
+      })
+      if (!result.success) throw new AggregateError(result.logs, `failed to bundle ${entrypoint}`)
+    }
+    console.log('build-desktop-executable: generated embedded code and workflow workers')
+  }
+
+  /**
+   * Keep only files that compiled plugins still consume as data. Server code
+   * and ordinary npm dependencies are already in the Bun executable; copying
+   * the whole deployed node_modules would duplicate that graph and make first
+   * launch expand tens of thousands of files in memory.
+   */
+  private async stageRuntimeData(): Promise<void> {
+    await rm(this.stagingRoot, { recursive: true, force: true })
+    const copyFrom = async (source: string, relativePath: string): Promise<void> => {
+      if (!existsSync(source)) throw new Error(`build-desktop-executable: missing runtime data ${source}`)
+      const destination = join(this.dshRoot, relativePath)
+      await mkdir(dirnameOfFs(destination), { recursive: true })
+      await cp(source, destination, { recursive: statSync(source).isDirectory(), dereference: true })
+    }
+    const packageRelative = (name: string): string => join('node_modules', ...name.split('/'))
+    const copyPackage = async (name: string): Promise<void> => {
+      await copyFrom(resolve(root, 'node_modules/.pnpm/node_modules', ...name.split('/')), packageRelative(name))
+    }
+
+    for (const name of this.workspaceClosure) {
+      const manifest = this.workspaceManifests.get(name)
+      const directory = this.workspaceDirectories.get(name)
+      if (manifest === undefined || directory === undefined) continue
+      const packageRoot = packageRelative(name)
+      const sourcePackageRoot = resolve(root, directory)
+      const copyWorkspacePath = async (path: string): Promise<void> => {
+        await copyFrom(join(sourcePackageRoot, path), join(packageRoot, path))
+      }
+      await copyWorkspacePath('package.json')
+      const patch = manifest.dsh?.bundle?.patch
+      if (patch !== undefined) await copyWorkspacePath(patch)
+      if (manifest.dsh?.client !== undefined) {
+        const clientEntry = resolvePackageEntry(manifest, 'client')
+        if (clientEntry === undefined) throw new Error(`build-desktop-executable: ${name} declares dsh.client without a client export`)
+        await copyWorkspacePath(clientEntry)
+      }
+      if (name === CLI_PACKAGE) await copyWorkspacePath('config')
+      if (name === '@deepseek-ai/dsh-web-frontend') await copyWorkspacePath('dist')
+      if (name === '@deepseek-ai/dsh-skill-badge') await copyWorkspacePath('assets')
+    }
+
+    // Native/runtime-resolved packages cannot live inside Bun's virtual FS.
+    for (const name of ['sharp', '@img/colour', 'detect-libc', 'semver', '@vscode/ripgrep']) {
+      await copyPackage(name)
+    }
+    const sharpPlatform = this.cli.target.platform === 'windows' ? 'win32' : this.cli.target.platform === 'macos' ? 'darwin' : 'linux'
+    await copyPackage(`@img/sharp-${sharpPlatform}-${this.cli.target.arch}`)
+    if (this.cli.target.platform !== 'windows') {
+      await copyPackage(`@img/sharp-libvips-${sharpPlatform}-${this.cli.target.arch}`)
+    }
+    await copyPackage(`@vscode/ripgrep-${sharpPlatform}-${this.cli.target.arch}`)
+    if (this.cli.target.platform === 'windows') {
+      await copyPackage('koffi')
+      await copyPackage(`@koromix/koffi-win32-${this.cli.target.arch}`)
+    }
+
+    const files = await listFiles(this.stagingRoot)
+    console.log(`build-desktop-executable: staged runtime data in ${files.length} files`)
+  }
+
+  private async discoverRuntimeClosure(): Promise<void> {
     const manifests = new Map<string, WorkspaceManifest>()
     const patterns = [
       'apps/*/package.json',
@@ -158,8 +257,12 @@ class DesktopExecutableBuild {
     for (const path of globSync(patterns, { cwd: root }).sort()) {
       if (path.startsWith('apps/desktop-runtime-build/')) continue
       const manifest = JSON.parse(await readFile(resolve(root, path), 'utf8')) as WorkspaceManifest
-      if (manifest.name) manifests.set(manifest.name, manifest)
+      if (manifest.name) {
+        manifests.set(manifest.name, manifest)
+        this.workspaceDirectories.set(manifest.name, dirnameOf(path))
+      }
     }
+    this.workspaceManifests = manifests
 
     const closure = new Set<string>()
     const queue = [CLI_PACKAGE]
@@ -184,43 +287,73 @@ class DesktopExecutableBuild {
       }
     }
 
-    await rm(DEPLOY_MANIFEST_DIR, { recursive: true, force: true })
-    await mkdir(DEPLOY_MANIFEST_DIR, { recursive: true })
-    const dependencies = Object.fromEntries([...closure].sort().map(name => [name, 'workspace:^']))
-    await writeFile(join(DEPLOY_MANIFEST_DIR, 'package.json'), `${JSON.stringify({
-      name: DEPLOY_PACKAGE,
-      version: '0.0.0',
-      private: true,
-      type: 'module',
-      dependencies,
-    }, null, 2)}\n`)
-    console.log(`build-desktop-executable: generated ${closure.size}-package workspace runtime closure`)
+    this.workspaceClosure = [...closure].sort()
+    console.log(`build-desktop-executable: discovered ${closure.size}-package workspace runtime closure`)
   }
 
-  private async stageNodeRuntime(): Promise<void> {
-    const node = (await capture('node', ['-p', 'process.execPath'])).trim()
-    const version = await capture(node, ['--version'])
-    if (!/^v24\./.test(version.trim())) {
-      throw new Error(`build-desktop-executable: Node.js 24 is required, received ${JSON.stringify(version.trim())}`)
+  private async generatePluginRegistry(): Promise<void> {
+    const closure = new Set(this.workspaceClosure)
+    const specifiers = new Set<string>([
+      '@deepseek-ai/dsh-host-directory-picker-native',
+      '@deepseek-ai/dsh-host-directory-picker-browse',
+      '@deepseek-ai/dsh-client-ui-directory-picker-native',
+      '@deepseek-ai/dsh-client-ui-directory-picker-browse',
+    ])
+    for (const name of closure) {
+      const manifest = this.workspaceManifests.get(name)
+      if (manifest !== undefined && resolvePackageEntry(manifest, 'typert') !== undefined) {
+        specifiers.add(`${name}/typert`)
+      }
     }
-    const destination = join(this.stagingRoot, 'node', process.platform === 'win32' ? 'node.exe' : 'node')
-    await mkdir(dirname(destination), { recursive: true })
-    await copyFile(node, destination)
-    if (process.platform !== 'win32') await chmod(destination, 0o755)
-  }
-
-  private async restoreLinuxPtyAddon(): Promise<void> {
-    if (this.cli.target.platform !== 'linux') return
-    const source = resolve(
-      root,
-      'packages/subprocess/subprocess-local/node_modules/node-pty/build/Release/pty.node',
-    )
-    const destination = join(this.dshRoot, 'node_modules/node-pty/build/Release/pty.node')
-    if (!existsSync(source)) {
-      throw new Error(`build-desktop-executable: Linux node-pty addon is missing at ${source}`)
+    const configPaths = globSync([
+      'apps/cli/config/**/*.{yml,yaml}',
+      'packages/*/*/cordis.patch.yml',
+    ], { cwd: root }).sort()
+    for (const path of configPaths) {
+      const source = await readFile(resolve(root, path), 'utf8')
+      for (const match of source.matchAll(/^\s*name:\s*['"]?([^'"\s#]+)/gm)) {
+        const specifier = match[1]
+        if (!specifier?.startsWith('@')) continue
+        const packageName = specifier.split('/').slice(0, 2).join('/')
+        if (closure.has(packageName)) specifiers.add(specifier)
+      }
     }
-    await mkdir(dirname(destination), { recursive: true })
-    await copyFile(source, destination)
+    const entries = [...specifiers].sort().map((specifier) => {
+      const packageName = specifier.split('/').slice(0, 2).join('/')
+      const subpath = specifier.slice(packageName.length + 1)
+      const manifest = this.workspaceManifests.get(packageName)
+      const directory = this.workspaceDirectories.get(packageName)
+      const target = manifest === undefined ? undefined : resolvePackageEntry(manifest, subpath)
+      if (directory === undefined || target === undefined) {
+        throw new Error(`build-desktop-executable: cannot resolve compiled plugin entry ${specifier}`)
+      }
+      const sourceCandidates = [
+        resolve(root, directory, 'src', subpath === '' ? 'index.ts' : `${subpath}.ts`),
+        resolve(root, directory, target.replace(/^\.\/lib\//, 'src/').replace(/\.js$/, '.ts')),
+      ]
+      const absoluteTarget = sourceCandidates.find(existsSync) ?? resolve(root, directory, target)
+      let importPath = relative(GENERATED_DIR, absoluteTarget).split(sep).join('/')
+      if (!importPath.startsWith('.')) importPath = `./${importPath}`
+      return `  ${JSON.stringify(specifier)}: () => import(${JSON.stringify(importPath)}),`
+    })
+    const source = [
+      '/** Generated by scripts/build-desktop-executable.ts; do not edit. */',
+      'const modules: Record<string, () => Promise<unknown>> = {',
+      ...entries,
+      '}',
+      '',
+      'export function importDesktopPlugin(name: string): Promise<unknown> {',
+      '  const load = modules[name]',
+      '  if (load === undefined) {',
+      '    throw new Error(`dsh-desktop: plugin ${JSON.stringify(name)} is not compiled into this executable`)',
+      '  }',
+      '  return load()',
+      '}',
+      '',
+    ].join('\n')
+    await mkdir(GENERATED_DIR, { recursive: true })
+    await writeFile(GENERATED_PLUGIN_REGISTRY, source)
+    console.log(`build-desktop-executable: generated ${specifiers.size}-plugin compiled registry`)
   }
 
   private async createRuntimeArchive(): Promise<string> {
@@ -257,6 +390,7 @@ class DesktopExecutableBuild {
       outfile: this.cli.target.output,
       target: this.cli.target.bunTarget,
       minify: true,
+      plugins: [this.sharpBindingPlugin()],
       define: {
         DSH_DESKTOP_RUNTIME_SHA256: JSON.stringify(runtimeSha256),
         DSH_DESKTOP_VERSION: JSON.stringify(version),
@@ -279,6 +413,24 @@ class DesktopExecutableBuild {
     console.log(
       `build-desktop-executable: product ${result.outfile} (${formatSize(result.size)}, sha256=${result.sha256})`,
     )
+  }
+
+  private sharpBindingPlugin(): BunBuildPlugin {
+    const platform = this.cli.target.platform === 'windows' ? 'win32' : this.cli.target.platform === 'macos' ? 'darwin' : 'linux'
+    const addonPackage = `@img/sharp-${platform}-${this.cli.target.arch}`
+    const addonRoot = resolve(root, 'node_modules/.pnpm/node_modules', ...addonPackage.split('/'))
+    const addonFile = globSync('lib/*.node', { cwd: addonRoot })[0]
+    if (addonFile === undefined) throw new Error(`build-desktop-executable: no N-API addon found in ${addonRoot}`)
+    const addonPath = resolve(addonRoot, addonFile)
+    return {
+      name: 'dsh-desktop-sharp-binding',
+      setup(builder) {
+        builder.onLoad({ filter: /[/\\]sharp[/\\]dist[/\\]sharp\.mjs$/ }, () => ({
+          contents: `import binding from ${JSON.stringify(addonPath)}; export default binding`,
+          loader: 'js',
+        }))
+      },
+    }
   }
 
   private async runCommand(label: string, command: string, args: string[]): Promise<void> {
@@ -312,27 +464,6 @@ async function listFiles(directory: string): Promise<string[]> {
   return files.sort()
 }
 
-async function capture(command: string, args: string[]): Promise<string> {
-  return await new Promise<string>((resolvePromise, reject) => {
-    const child = spawn(command, args, { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] })
-    let stdout = ''
-    let stderr = ''
-    child.stdout.setEncoding('utf8')
-    child.stderr.setEncoding('utf8')
-    child.stdout.on('data', (chunk: string) => {
-      stdout += chunk
-    })
-    child.stderr.on('data', (chunk: string) => {
-      stderr += chunk
-    })
-    child.once('error', reject)
-    child.once('exit', (code, signal) => {
-      if (code === 0) resolvePromise(stdout)
-      else reject(new Error(`${basename(command)} failed (${code ?? signal ?? 'unknown'}): ${stderr.trim()}`))
-    })
-  })
-}
-
 function pnpmBin(): string {
   return process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm'
 }
@@ -345,13 +476,43 @@ function formatSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
+function dirnameOf(path: string): string {
+  const slash = path.lastIndexOf('/')
+  return slash < 0 ? '.' : path.slice(0, slash)
+}
+
+function conditionalExport(value: unknown): string | undefined {
+  if (typeof value === 'string') return value
+  if (value === null || typeof value !== 'object') return undefined
+  const record = value as Record<string, unknown>
+  return conditionalExport(record.default ?? record.import ?? record.node)
+}
+
+function resolvePackageEntry(manifest: WorkspaceManifest, subpath: string): string | undefined {
+  const key = subpath === '' ? '.' : `./${subpath}`
+  if (typeof manifest.exports === 'string') return subpath === '' ? manifest.exports : undefined
+  const exported = manifest.exports?.[key]
+  return conditionalExport(exported) ?? (subpath === '' ? manifest.main : undefined)
+}
+
 interface WorkspaceManifest {
   readonly name?: string
+  readonly main?: string
+  readonly exports?: string | Record<string, unknown>
   readonly cpu?: string[]
   readonly os?: string[]
   readonly dependencies?: Record<string, string>
   readonly optionalDependencies?: Record<string, string>
   readonly peerDependencies?: Record<string, string>
+  readonly dsh?: {
+    readonly bundle?: { readonly patch?: string }
+    readonly client?: unknown
+  }
+}
+
+function dirnameOfFs(path: string): string {
+  const slash = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'))
+  return slash < 0 ? '.' : path.slice(0, slash)
 }
 
 function supportsTarget(manifest: WorkspaceManifest, target: DesktopTarget): boolean {

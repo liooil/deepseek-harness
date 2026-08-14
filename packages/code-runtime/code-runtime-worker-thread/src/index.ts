@@ -1,13 +1,13 @@
 /**
  * Worker-thread code runtime: a fresh worker runs each host-type-stripped TypeScript program
  * and bridges bindings over its message port. This is containment, not a security boundary:
- * model code has bash-equivalent trust despite an empty environment, a heap cap, measured
- * event-loop busy-time and wall-time budgets, and termination that also stops synchronous loops.
+ * model code has bash-equivalent trust despite an empty environment, a heap cap, host-appropriate
+ * compute and wall-time budgets, and termination that also stops synchronous loops.
  * @module @deepseek-ai/dsh-code-runtime-worker-thread
  */
 
 import { Worker } from 'node:worker_threads'
-import { stripTypeScriptTypes } from 'node:module'
+import type { WorkerOptions } from 'node:worker_threads'
 import type { Readable } from 'node:stream'
 import { fileURLToPath } from 'node:url'
 import { Context } from '@deepseek-ai/cordis'
@@ -24,13 +24,10 @@ import type { WorkerJsonWire } from './worker-json.ts'
 /** Plugin config: every execution cap, changeable from `cordis.yml` (no hardcoded tunables). */
 export interface Config {
   /**
-   * Busy-time budget in milliseconds: the run fails with kind `'timeout'`
-   * once the worker's MEASURED event-loop active time
-   * (`worker.performance.eventLoopUtilization()`) exceeds this. Metering
-   * measured busy time — not wall time, not host-side pending-call
-   * bookkeeping — is what makes the budget both fair (a program awaiting a
-   * slow tool accrues nothing) and ungameable (a hot loop accrues whether
-   * or not a decoy dispatch is in flight).
+   * Compute budget in milliseconds. Node meters cumulative worker event-loop
+   * active time. Bun, whose Worker ELU API is unimplemented, fails a worker
+   * that remains unresponsive to heartbeats for this interval. Both preserve
+   * slow awaited bindings while stopping uninterrupted synchronous work.
    */
   computeMs?: number
   /**
@@ -54,13 +51,24 @@ export interface Config {
 type ResolvedConfig = Required<Config>
 
 /**
- * How often the host samples the worker's event-loop utilization for the
- * `computeMs` budget. An internal cadence, not config: the only effect of
- * the interval is budget-expiry granularity (a run can overshoot by up to
- * one interval), and nothing a deployment could tune here improves that
- * without burning host CPU.
+ * How often the host samples Node worker ELU or checks a Bun worker heartbeat.
+ * This is an internal budget-expiry cadence, not deployment config.
  */
 const ELU_POLL_INTERVAL_MS = 25
+
+/** Bun exposes Worker.performance but currently returns zero with ERR_NOT_IMPLEMENTED. */
+const IS_BUN = typeof process.versions.bun === 'string'
+
+/** Bun standalone hosts supply the separately embedded worker entry here. */
+let embeddedBunWorkerEntry: string | URL | undefined
+
+/**
+ * Configure the code worker asset embedded by a Bun standalone host.
+ * @param entry - compiled worker file URL or path supplied by the host.
+ */
+export function configureCodeWorkerEntry(entry: string | URL): void {
+  embeddedBunWorkerEntry = entry
+}
 
 /** Smallest cap that can represent the counted payloads: an empty logs array plus an empty JSON failure message. */
 const MIN_OUTPUT_BYTES = 4
@@ -82,6 +90,31 @@ const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/
  * line/column positions intact.
  */
 const STRIP_WRAP = { prefix: 'async function __dsh_program__() {\n', suffix: '\n}' } as const
+
+interface BunTranspiler {
+  transformSync(source: string): string
+}
+
+interface BunRuntime {
+  Transpiler: new (options: { loader: 'ts'; target: 'bun' }) => BunTranspiler
+}
+
+/** Strip/transpile a program with the current host without statically importing Node-only APIs. */
+async function stripProgramTypes(program: string): Promise<string> {
+  const wrapped = STRIP_WRAP.prefix + program + STRIP_WRAP.suffix
+  const bun = (globalThis as typeof globalThis & { Bun?: BunRuntime }).Bun
+  if (bun !== undefined) {
+    const transformed = new bun.Transpiler({ loader: 'ts', target: 'bun' }).transformSync(wrapped)
+    const bodyStart = transformed.indexOf('{')
+    const bodyEnd = transformed.lastIndexOf('}')
+    if (bodyStart < 0 || bodyEnd <= bodyStart) throw new Error('Bun TypeScript transform lost the program wrapper')
+    return transformed.slice(bodyStart + 1, bodyEnd)
+  }
+  const moduleName: string = 'node:module'
+  const module = await import(moduleName) as { stripTypeScriptTypes(source: string): string }
+  const stripped = module.stripTypeScriptTypes(wrapped)
+  return stripped.slice(STRIP_WRAP.prefix.length, stripped.length - STRIP_WRAP.suffix.length)
+}
 
 /** One in-flight run's host-side state, tracked for disposal. */
 interface LiveRun {
@@ -111,7 +144,8 @@ function messageOf(error: unknown): string {
 }
 
 /** Resolve after a worker pipe emits all queued data, or closes/errors during termination. */
-function waitForPipeDrain(stream: Readable): Promise<void> {
+function waitForPipeDrain(stream: Readable | null): Promise<void> {
+  if (stream === null) return Promise.resolve()
   if (stream.readableEnded || stream.destroyed) return Promise.resolve()
   return new Promise((resolve) => {
     const done = (): void => {
@@ -152,6 +186,7 @@ function parseWorkerMessage(raw: unknown): WorkerToHost | undefined {
       return { type: 'log', text: m.text }
     }
     case 'output-limit': return { type: 'output-limit' }
+    case 'heartbeat': return { type: 'heartbeat' }
     case 'done': {
       if (m.error === undefined) return { type: 'done', ...m.value !== undefined ? { value: m.value as WorkerJsonWire } : {} }
       const error = m.error
@@ -299,8 +334,7 @@ export class WorkerThreadCodeRuntime extends CodeRuntime {
 
     let code: string
     try {
-      const stripped = stripTypeScriptTypes(STRIP_WRAP.prefix + request.program + STRIP_WRAP.suffix)
-      code = stripped.slice(STRIP_WRAP.prefix.length, stripped.length - STRIP_WRAP.suffix.length)
+      code = await stripProgramTypes(request.program)
     } catch (error: unknown) {
       // A program that does not survive the type-strip (syntax error,
       // non-erasable syntax like `enum`) is a program failure, reported the
@@ -375,7 +409,7 @@ export class WorkerThreadCodeRuntime extends CodeRuntime {
       })),
       maxOutputBytes: this.config.maxOutputBytes,
     }
-    const worker = new Worker(WORKER_PATH, {
+    const workerOptions: WorkerOptions = {
       workerData: bootData,
       // Model code gets NO ambient environment — stronger than the scrubbed
       // env the defensive-patterns rule requires for spawned commands.
@@ -390,7 +424,12 @@ export class WorkerThreadCodeRuntime extends CodeRuntime {
       // still arrives (native-level writes) is appended after the done logs.
       stdout: true,
       stderr: true,
-    })
+    }
+    // The literal URL makes Bun's compile step discover and embed the worker.
+    // Node's package build continues to load the sibling worker.cjs.
+    const worker = IS_BUN
+      ? new Worker(embeddedBunWorkerEntry ?? new URL('./worker.ts', import.meta.url), workerOptions)
+      : new Worker(WORKER_PATH, workerOptions)
 
     return new Promise<CodeRunResult>((resolve) => {
       let settled = false
@@ -414,8 +453,10 @@ export class WorkerThreadCodeRuntime extends CodeRuntime {
           finish(limited)
         }
       }
-      worker.stdout.on('data', captureStray)
-      worker.stderr.on('data', captureStray)
+      const stdout = worker.stdout as Readable | null
+      const stderr = worker.stderr as Readable | null
+      stdout?.on('data', captureStray)
+      stderr?.on('data', captureStray)
 
       // Exactly one outcome wins. Every path cleans up, terminates, and awaits the worker;
       // logs captured before timeout, abort, or failure remain in the result.
@@ -511,6 +552,10 @@ export class WorkerThreadCodeRuntime extends CodeRuntime {
         // this listener would crash the host process. Junk drops silently.
         const message = parseWorkerMessage(raw)
         if (!message) return
+        if (message.type === 'heartbeat') {
+          lastHeartbeatAt = Date.now()
+          return
+        }
         if (message.type === 'log' && !settled && !output.admit(message.text, logs)) {
           const limited = output.limit([...logs, ...strayLogs, message.text])
           finish(limited)
@@ -531,10 +576,17 @@ export class WorkerThreadCodeRuntime extends CodeRuntime {
         finish(() => output.failure([...logs, ...strayLogs], { kind: 'worker-exit', message: `worker exited with code ${exitCode} before completing` }))
       })
 
-      // The compute budget reads the worker's own measured busy time, so a
-      // hot loop expires it no matter what dispatches are in flight, while a
-      // program idling on a slow binding accrues nothing.
+      // Node reads cumulative measured busy time. Bun uses worker heartbeats
+      // because its Worker ELU API is unimplemented: a hot loop prevents the
+      // heartbeat, while a program idling on a slow binding remains responsive.
+      let lastHeartbeatAt = Date.now()
       const eluTimer = setInterval(() => {
+        if (IS_BUN) {
+          if (Date.now() - lastHeartbeatAt > this.config.computeMs) {
+            finish(() => output.failure([...logs, ...strayLogs], { kind: 'timeout', message: `compute budget exhausted (${this.config.computeMs}ms unresponsive)` }))
+          }
+          return
+        }
         const elu = worker.performance.eventLoopUtilization()
         if (elu.active > this.config.computeMs) {
           finish(() => output.failure([...logs, ...strayLogs], { kind: 'timeout', message: `compute budget exhausted (${this.config.computeMs}ms busy)` }))

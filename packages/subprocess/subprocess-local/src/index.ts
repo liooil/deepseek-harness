@@ -1,7 +1,7 @@
 /**
  * Local Service Provider for the subprocess capability seam. Each spawn is a detached
  * process tree with the spec's per-stream stdio dispositions. Normal disposal
- * terminates and joins live trees; Node's synchronous exit phase force-stops
+ * terminates and joins live trees; the host's synchronous exit phase force-stops
  * any trees the service still owns. It has no config: every disposition and
  * limit arrives on the spec, so the deployment-varying choices stay with the
  * caller's config (the bash executor's, the LSP host's, …).
@@ -12,8 +12,6 @@ import { constants } from 'node:fs'
 import { access, stat } from 'node:fs/promises'
 import { delimiter, extname, isAbsolute, resolve } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
-import * as nodePty from 'node-pty'
-import type { IPtyForkOptions } from 'node-pty'
 import { SubprocessRuntime } from '@deepseek-ai/dsh-subprocess'
 import type {
   SubprocessHandle,
@@ -25,7 +23,86 @@ import { childEnv, spawnSubprocess } from './spawn.ts'
 import type { LocalSubprocessHandle, SpawnInternals } from './spawn.ts'
 import { createProcessInspector } from './process-inspector.ts'
 import type { ProcessInspector } from './process-inspector.ts'
-import { LocalTerminalHandle } from './terminal.ts'
+import { LocalTerminalHandle, type TerminalBackend, type TerminalDisposable } from './terminal.ts'
+
+interface BunTerminal {
+  write(data: string): number
+  close(): void
+}
+
+interface BunTerminalConstructor {
+  new(options: {
+    name: string
+    rows: number
+    cols: number
+    data(terminal: BunTerminal, bytes: Uint8Array): void
+  }): BunTerminal
+}
+
+interface BunProcess {
+  readonly pid: number
+  readonly exited: Promise<number>
+  readonly signalCode: number | null
+  kill(signal?: string): void
+}
+
+interface BunRuntime {
+  Terminal: BunTerminalConstructor
+  spawn(argv: string[], options: {
+    cwd: string
+    env: NodeJS.ProcessEnv
+    terminal: BunTerminal
+  }): BunProcess
+}
+
+async function spawnTerminalBackend(
+  file: string,
+  args: string[],
+  spec: SubprocessTerminalSpawnSpec,
+): Promise<TerminalBackend> {
+  const bun = (globalThis as typeof globalThis & { Bun?: BunRuntime }).Bun
+  if (bun !== undefined) {
+    const dataListeners = new Set<(data: string) => void>()
+    const exitListeners = new Set<(event: { exitCode: number; signal?: number }) => void>()
+    const decoder = new TextDecoder()
+    const terminal = new bun.Terminal({
+      name: 'dumb',
+      rows: spec.rows,
+      cols: spec.cols,
+      data(_terminal, bytes) {
+        const text = decoder.decode(bytes, { stream: true })
+        for (const listener of dataListeners) listener(text)
+      },
+    })
+    const process = bun.spawn([file, ...args], {
+      cwd: spec.cwd,
+      env: childEnv(spec.env),
+      terminal,
+    })
+    void process.exited.then((exitCode) => {
+      const event = { exitCode, ...(process.signalCode === null ? {} : { signal: process.signalCode }) }
+      for (const listener of exitListeners) listener(event)
+      terminal.close()
+    })
+    const subscribe = <T>(listeners: Set<T>, listener: T): TerminalDisposable => {
+      listeners.add(listener)
+      return { dispose: () => { listeners.delete(listener) } }
+    }
+    return {
+      pid: process.pid,
+      write: (data) => { terminal.write(data) },
+      kill: (signal) => { process.kill(signal) },
+      onData: listener => subscribe(dataListeners, listener),
+      onExit: listener => subscribe(exitListeners, listener),
+    }
+  }
+
+  const packageName: string = 'node-pty'
+  const nodePty = await import(packageName) as typeof import('node-pty')
+  return nodePty.spawn(file, args, {
+    name: 'dumb', rows: spec.rows, cols: spec.cols, cwd: spec.cwd, env: childEnv(spec.env),
+  })
+}
 
 /**
  * Local subprocess service: detached process trees, Node-shaped stdio
@@ -157,22 +234,14 @@ export class LocalSubprocessRuntime extends SubprocessRuntime {
   }
 
   // Local PTY allocation is synchronous, but the provider contract permits remote asynchronous allocation.
-  // oxlint-disable-next-line typescript/require-await -- Preserve promise rejection semantics at the async provider contract.
   async spawnTerminal(spec: SubprocessTerminalSpawnSpec): Promise<SubprocessTerminalHandle> {
     const file = spec.argv[0]
     if (file === undefined || file.length === 0) {
       throw new Error('subprocess-local: terminal argv must contain a program')
     }
     spec.signal?.throwIfAborted()
-    const options: IPtyForkOptions = {
-      name: 'dumb',
-      rows: spec.rows,
-      cols: spec.cols,
-      cwd: spec.cwd,
-      env: childEnv(spec.env),
-    }
     const inspector = this.terminalInspector ?? createProcessInspector()
-    const terminal = nodePty.spawn(file, [...spec.argv.slice(1)], options)
+    const terminal = await spawnTerminalBackend(file, [...spec.argv.slice(1)], spec)
     const handle = new LocalTerminalHandle(terminal, inspector, spec.graceMs)
     this.terminals.add(handle)
     const release = async (): Promise<void> => {

@@ -52,7 +52,7 @@ const releaseMemberDirectory = /^(?:packages\/[^/]+\/[^/]+|apps\/[^/]+|vendor\/[
 
 const localArtifactDirs = new Set(['node_modules'])
 const appPackageFiles: Readonly<Record<string, readonly string[]>> = {
-  '@deepseek-ai/dsh': ['lib/*.js', 'config'],
+  '@deepseek-ai/dsh': ['lib/*.js', 'lib/types/profile-boot.d.ts', 'config'],
   '@deepseek-ai/dsh-desktop': ['lib/*.js'],
   // The Web build emits sourcemaps for browser debugging; publishing them is
   // what the payload policy forbids, so the bundle ships without them.

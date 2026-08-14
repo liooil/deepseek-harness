@@ -28,6 +28,7 @@ import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
 import { Service } from '@deepseek-ai/cordis'
 import type { Context } from '@deepseek-ai/cordis'
+import type {} from '@deepseek-ai/dsh-app-boot'
 import type {} from '@deepseek-ai/cordis-plugin-loader'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import type { WebBootEntry, WebBootGraph } from './client/manifest.ts'
@@ -209,8 +210,13 @@ export class ClientModuleRegistry extends Service {
     if (ctx.baseUrl === undefined) {
       throw new Error('client-modules: ctx.baseUrl is unset — the node half needs the config-tree anchor to resolve plugin packages')
     }
-    const require = createRequire(ctx.baseUrl)
-    this.resolvePkgJson = spec => require.resolve(`${spec}/package.json`)
+    const runtimePaths = ctx.get('dshRuntimePaths')
+    if (runtimePaths !== undefined) {
+      this.resolvePkgJson = spec => runtimePaths.resolvePackageJson(spec)
+    } else {
+      const require = createRequire(ctx.baseUrl)
+      this.resolvePkgJson = spec => require.resolve(`${spec}/package.json`)
+    }
 
     // Subscribe before seeding so a fiber arriving mid-activation lands in the
     // same dirty set (Set idempotence makes the overlap harmless). An entry-less

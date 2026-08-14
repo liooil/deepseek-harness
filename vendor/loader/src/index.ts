@@ -72,6 +72,9 @@ export class Loader extends EntryTree {
   public name = 'loader'
   public internal = ModuleLoader.fromInternal()
 
+  /** Optional closed-host importer for bare plugin specifiers. */
+  public moduleImporter?: (specifier: string, parentUrl: string) => unknown
+
   public builtins: Dict<any> = Object.create(null)
 
   constructor(ctx: Context, public config: Loader.Config = {}) {

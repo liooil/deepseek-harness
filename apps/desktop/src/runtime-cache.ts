@@ -14,13 +14,12 @@ export interface EmbeddedDshRuntime {
 
 export interface MaterializedDshRuntime {
   readonly root: string
-  readonly node: string
-  readonly dshBin: string
+  readonly installAnchor: string
   readonly extracted: boolean
 }
 
 /**
- * Materialize the embedded Node/DSH payload into an owner-only,
+ * Materialize the embedded DSH data payload into an owner-only,
  * content-addressed cache directory.
  */
 export async function materializeDshRuntime(
@@ -114,20 +113,17 @@ async function inspectRuntime(
   root: string,
   sha256: string,
 ): Promise<Omit<MaterializedDshRuntime, 'extracted'> | undefined> {
-  const node = join(root, 'node', process.platform === 'win32' ? 'node.exe' : 'node')
-  const dshBin = join(root, 'dsh', 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js')
+  const installAnchor = join(root, 'dsh', 'node_modules', '@deepseek-ai', 'dsh', 'package.json')
   try {
-    const [rootStat, nodeStat, binStat, marker] = await Promise.all([
+    const [rootStat, anchorStat, marker] = await Promise.all([
       lstat(root),
-      lstat(node),
-      lstat(dshBin),
+      lstat(installAnchor),
       readFile(join(root, COMPLETE_MARKER), 'utf8'),
     ])
     if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) return undefined
-    if (!nodeStat.isFile() || nodeStat.isSymbolicLink()) return undefined
-    if (!binStat.isFile() || binStat.isSymbolicLink()) return undefined
+    if (!anchorStat.isFile() || anchorStat.isSymbolicLink()) return undefined
     if (marker.trim() !== sha256) return undefined
-    return { root, node, dshBin }
+    return { root, installAnchor }
   } catch {
     return undefined
   }

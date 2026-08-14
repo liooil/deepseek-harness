@@ -15,19 +15,16 @@ afterEach(async () => {
 describe('embedded desktop runtime cache', () => {
   it('extracts once into a content-addressed owner-only directory', async () => {
     const fixture = await createFixtureArchive([
-      { name: process.platform === 'win32' ? 'node/node.exe' : 'node/node', body: 'node', executable: true },
-      { name: 'dsh/node_modules/@deepseek-ai/dsh/lib/bin.js', body: 'entry', executable: false },
+      { name: 'dsh/node_modules/@deepseek-ai/dsh/package.json', body: '{}', executable: false },
     ])
     const cache = await createTemporaryDirectory()
     const runtime = { archivePath: fixture.path, sha256: fixture.sha256, version: '1.2.3' }
 
     const first = await materializeDshRuntime(runtime, cache)
     expect(first.extracted).toBe(true)
-    expect(await readFile(first.node, 'utf8')).toBe('node')
-    expect(await readFile(first.dshBin, 'utf8')).toBe('entry')
+    expect(await readFile(first.installAnchor, 'utf8')).toBe('{}')
     if (process.platform !== 'win32') {
-      expect((await stat(first.node)).mode & 0o777).toBe(0o700)
-      expect((await stat(first.dshBin)).mode & 0o777).toBe(0o600)
+      expect((await stat(first.installAnchor)).mode & 0o777).toBe(0o600)
     }
 
     const second = await materializeDshRuntime(runtime, cache)
@@ -36,8 +33,7 @@ describe('embedded desktop runtime cache', () => {
 
   it('rejects a payload whose embedded checksum does not match', async () => {
     const fixture = await createFixtureArchive([
-      { name: process.platform === 'win32' ? 'node/node.exe' : 'node/node', body: 'node', executable: true },
-      { name: 'dsh/node_modules/@deepseek-ai/dsh/lib/bin.js', body: 'entry', executable: false },
+      { name: 'dsh/node_modules/@deepseek-ai/dsh/package.json', body: '{}', executable: false },
     ])
     const cache = await createTemporaryDirectory()
 

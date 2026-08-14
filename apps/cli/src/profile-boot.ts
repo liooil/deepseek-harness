@@ -27,6 +27,7 @@ import {
   loadProfile,
   PROFILE_PATCH_FILENAME,
   watchUserPatches,
+  type DshRuntimePaths,
   type Profile,
 } from '@deepseek-ai/dsh-app-boot'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
@@ -95,9 +96,9 @@ export function resolveTelemetryPatch(disabledEnv: string | undefined, hasRow: b
  * @param userLayer - `false` skips parsing `cordis.patch.yml` (the default dump).
  * @returns the loaded profile.
  */
-export function prepareProfile(name: string, userLayer = true): Profile {
-  healProfilesModuleFallback(INSTALL_ANCHOR)
-  const profile = loadProfile(NAME, name, INSTALL_ANCHOR, undefined, { userLayer })
+export function prepareProfile(name: string, userLayer = true, installAnchor = INSTALL_ANCHOR): Profile {
+  healProfilesModuleFallback(installAnchor)
+  const profile = loadProfile(NAME, name, installAnchor, undefined, { userLayer })
   writeFileSync(join(profile.dir, PROFILE_ROOT_FILENAME), PROFILE_ROOT_CONFIG)
   return profile
 }
@@ -142,8 +143,10 @@ function allPatches(composed: ComposedProfile): PatchOptions[] {
 function composeProfile(
   name: string,
   patchFiles: readonly string[],
+  installAnchor: string,
+  shippedPresetRoot: string,
 ): ComposedProfile {
-  const profile = prepareProfile(name)
+  const profile = prepareProfile(name, true, installAnchor)
   const homePatches = loadOptionalPatches(NAME, homePatchPath()) ?? []
   const overlays = patchFiles.flatMap(file => loadOverlayPatches(NAME, resolve(file)))
   const bundlePatches = profile.layers.flatMap(layer => layer.patches)
@@ -161,7 +164,7 @@ function composeProfile(
       id: 'agent-presets',
       config: {
         ...(rows.get('agent-presets')?.config ?? {}) as Record<string, unknown>,
-        roots: [{ path: SHIPPED_PRESET_ROOT, trust: 'system' }],
+        roots: [{ path: shippedPresetRoot, trust: 'system' }],
       },
     })
   }
@@ -180,6 +183,18 @@ export interface RunProfileOptions {
   patchFiles: readonly string[]
   /** The invocation's inner arguments, handed to the tree through `ctx.cmdlineArgs`. */
   args: readonly string[]
+  /** Package manifest anchoring shipped profile and bundle discovery. */
+  installAnchor?: string
+  /** Shipped system preset directory for packaged hosts. */
+  shippedPresetRoot?: string
+  /** Importer for bare plugin names compiled into a closed host executable. */
+  bareModuleImporter?: (name: string) => unknown
+  /** Keep the writable profile layers live through the Node-only HMR watcher. */
+  watchPatches?: boolean
+  /** Register process SIGINT/SIGTERM handlers for this invocation. */
+  manageProcessSignals?: boolean
+  /** Filesystem resources extracted beside a compiled plugin graph. */
+  runtimePaths?: DshRuntimePaths
 }
 
 /**
@@ -205,7 +220,9 @@ function suppressShutdownError(ctx: Context, signal: AbortSignal, error: unknown
  * @returns the settled root context and the shutdown controller.
  */
 export async function runProfile(options: RunProfileOptions): Promise<{ ctx: Context; shutdown: ProcessShutdown }> {
-  const composed = composeProfile(options.profile, options.patchFiles)
+  const installAnchor = options.installAnchor ?? INSTALL_ANCHOR
+  const shippedPresetRoot = options.shippedPresetRoot ?? SHIPPED_PRESET_ROOT
+  const composed = composeProfile(options.profile, options.patchFiles, installAnchor, shippedPresetRoot)
   const app: { current?: Context } = {}
   const shutdown = createProcessShutdown(async () => { await app.current?.fiber.dispose() })
   const signalShutdown = new AbortController()
@@ -218,8 +235,10 @@ export async function runProfile(options: RunProfileOptions): Promise<{ ctx: Con
   // SIGTERM is a supervisor's ordinary stop request and exits 0 on every
   // surface — the launcher does not know whether the app considered its work
   // complete; SIGINT is a user interrupt and reports 130.
-  process.on('SIGTERM', () => { interrupt(0) })
-  process.on('SIGINT', () => { interrupt(130) })
+  if (options.manageProcessSignals !== false) {
+    process.on('SIGTERM', () => { interrupt(0) })
+    process.on('SIGINT', () => { interrupt(130) })
+  }
   installFailLoud(NAME, process, async () => {
     await app.current?.fiber.dispose()
   })
@@ -250,13 +269,14 @@ export async function runProfile(options: RunProfileOptions): Promise<{ ctx: Con
     // Before any config-tree entry mounts, so plugins resolve all launch-time
     // environment values from the same immutable provenance snapshot.
     hostCtx.provide(DSH_LAUNCH_ENVIRONMENT_KEY, options.environment)
+    if (options.runtimePaths !== undefined) hostCtx.provide('dshRuntimePaths', options.runtimePaths)
     // The command line and bounded exit request are launcher facts available
     // to every app plugin that injects the argument snapshot.
     provideCmdline(hostCtx, {
       args: options.args,
       exit: code => void shutdown.shutdown(code),
     })
-  })
+  }, installAnchor, options.bareModuleImporter)
   app.current = ctx
   // A surface can dispose the whole tree while boot or this post-boot watcher
   // setup is still in flight — a signal, or a fast one-shot's appExit. Loader
@@ -265,7 +285,8 @@ export async function runProfile(options: RunProfileOptions): Promise<{ ctx: Con
   // landed mid-setup. Watching is unconditional: a one-shot surface exits
   // through its bounded shutdown, which disposes the watchers before the
   // loop drains.
-  if (!signalShutdown.signal.aborted
+  if (options.watchPatches !== false
+    && !signalShutdown.signal.aborted
     && ctx.fiber.state === FiberState.ACTIVE
     && ctx.get('loader') !== undefined) {
     try {

@@ -10,7 +10,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { CallId } from '@deepseek-ai/dsh-llm'
 import type { ToolExecution } from '@deepseek-ai/dsh-tools'
-import { resolveRgPath, runRipgrep } from '@deepseek-ai/dsh-tool-fs-search'
+import { configureRipgrepPath, resolveRgPath, runRipgrep } from '@deepseek-ai/dsh-tool-fs-search'
 
 // Any access to the mocked module's surface throws — the shape a missing
 // platform package produces at module evaluation.
@@ -33,5 +33,10 @@ describe('lazy packaged-ripgrep resolution', () => {
   it('keeps failing every subsequent call (the resolution is memoized)', async () => {
     await expect(resolveRgPath()).rejects.toThrow(/platform package/)
     await expect(resolveRgPath()).rejects.toThrow(/platform package/)
+  })
+
+  it('accepts a host-supplied extracted binary without loading the platform package', async () => {
+    configureRipgrepPath('/runtime/native/rg')
+    await expect(resolveRgPath()).resolves.toBe('/runtime/native/rg')
   })
 })

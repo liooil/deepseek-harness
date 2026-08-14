@@ -9,7 +9,7 @@
  */
 
 import { randomUUID } from 'node:crypto'
-import { DatabaseSync } from 'node:sqlite'
+import type { DatabaseSync } from 'node:sqlite'
 import type { SessionEvent, SessionId, SessionHeader, SurfaceOp } from '@deepseek-ai/dsh-session'
 
 /**
@@ -79,7 +79,7 @@ export type JournalMode = 'wal' | 'delete' | 'truncate' | 'persist'
  * @returns the open handle with pragmas applied and all three tables ensured.
  */
 export function openDatabase(path: string, journalMode: JournalMode): DatabaseSync {
-  const db = new DatabaseSync(path)
+  const db = new DatabaseConstructor(path)
   try {
     configureDatabase(db, path, journalMode)
     return db
@@ -87,6 +87,17 @@ export function openDatabase(path: string, journalMode: JournalMode): DatabaseSy
     db.close()
     throw error
   }
+}
+
+let DatabaseConstructor: typeof DatabaseSync
+if (process.versions.bun !== undefined) {
+  const specifier: string = 'bun:sqlite'
+  const module = await import(specifier) as { Database: unknown }
+  DatabaseConstructor = module.Database as typeof DatabaseSync
+} else {
+  const specifier: string = 'node:sqlite'
+  const module = await import(specifier) as { DatabaseSync: typeof DatabaseSync }
+  DatabaseConstructor = module.DatabaseSync
 }
 
 function configureDatabase(db: DatabaseSync, path: string, journalMode: JournalMode): void {

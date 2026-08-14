@@ -25,7 +25,19 @@ declare module '@deepseek-ai/cordis' {
   interface Context {
     /** Harness-home path resolver available to Loader `!!js` config expressions. */
     dshHomePath?: typeof dshHomePath
+    /** Optional filesystem resolver supplied by a packaged single-process host. */
+    dshRuntimePaths?: DshRuntimePaths
   }
+}
+
+/** Filesystem resources kept outside a compiled plugin graph. */
+export interface DshRuntimePaths {
+  /** Resolve a package's exported `package.json`. */
+  resolvePackageJson(packageName: string): string
+  /** Resolve one exported package subpath, without a leading `./`. */
+  resolvePackageExport(packageName: string, subpath: string): string
+  /** Model-visible source/install root used by packaged surfaces. */
+  readonly harnessSourceRoot?: string
 }
 
 export {
@@ -479,6 +491,8 @@ function groupedDump(
  * @param patches - initial app and user patches, applied in order.
  * @param bareModuleBaseUrl - optional installed-host base for bare package
  * names; relative names continue to resolve beside the configuration file.
+ * @param bareModuleImporter - optional host importer for compiled bare package
+ * names; takes precedence over Loader's filesystem module resolver.
  * @returns the created root Include entry, or `undefined` when a surface
  * disposed the whole tree (taking the Loader service with it) while the
  * transactional create was still settling entry lifecycle.
@@ -488,17 +502,23 @@ export async function mountRootInclude(
   absoluteConfigPath: string,
   patches: readonly PatchOptions[] = [],
   bareModuleBaseUrl?: string,
+  bareModuleImporter?: (name: string) => unknown,
 ): Promise<Entry | undefined> {
-  ctx.loader.builtins.include = bareModuleBaseUrl === undefined
+  if (bareModuleImporter !== undefined) {
+    ctx.loader.moduleImporter = bareModuleImporter
+  }
+  ctx.loader.builtins.include = bareModuleBaseUrl === undefined && bareModuleImporter === undefined
     ? Include
     : class HostResolvedRootInclude extends Include {
       override import(name: string, getOuterStack?: () => string[]): unknown {
         const specifier = isAbsolute(name) ? pathToFileURL(name).href : name
         if (name.startsWith('.') || name.startsWith('cordis:')) return super.import(specifier, getOuterStack)
+        if (bareModuleImporter !== undefined) return bareModuleImporter(specifier)
         const internal = this.ctx.loader.internal
         /* v8 ignore next -- Node supplies the internal loader; this preserves the
            original diagnostic for hypothetical embedders without it. */
         if (internal === undefined) return super.import(specifier, getOuterStack)
+        if (bareModuleBaseUrl === undefined) throw new Error('app-boot: packaged module base is unavailable')
         return internal.import(specifier, bareModuleBaseUrl, {})
       }
     }
@@ -677,6 +697,17 @@ function formatActivationError(error: unknown): string {
   return error instanceof Error ? error.stack ?? error.message : String(error)
 }
 
+function formatNestedErrors(error: unknown, seen = new Set<unknown>()): string[] {
+  if (seen.has(error)) return []
+  seen.add(error)
+  if (error instanceof AggregateError) {
+    return (error.errors as unknown[]).flatMap(item => formatNestedErrors(item, seen))
+  }
+  if (!(error instanceof Error)) return []
+  if (error.cause !== undefined) return formatNestedErrors(error.cause, seen)
+  return [error.stack ?? error.message]
+}
+
 /**
  * Reject a settled Loader tree when an enabled entry failed or remains inactive.
  * Plugin failures include the original thrown stack; pending entries name their
@@ -748,6 +779,8 @@ export async function assertEntriesActivated(ctx: Context, binName: string): Pro
  * @param bareModuleBaseUrl - optional installed-host base for bare package
  * names; use it when the host, rather than the configuration project, owns the
  * complete plugin set.
+ * @param bareModuleImporter - optional host importer for compiled bare package
+ * names; takes precedence over Loader's filesystem module resolver.
  * @returns the root context once every entry has started, or as soon as a
  * surface disposed the tree while startup was still in flight.
  * @throws a labelled error after disposing the partial context — `host
@@ -760,6 +793,7 @@ export async function boot(
   patches?: PatchOptions[],
   prepare?: (ctx: Context) => Promise<void> | void,
   bareModuleBaseUrl?: string,
+  bareModuleImporter?: (name: string) => unknown,
 ): Promise<Context> {
   const ctx = new Context()
   // Two failure labels: `prepare` runs before any config-tree entry mounts,
@@ -771,7 +805,7 @@ export async function boot(
     await ctx.plugin(Loader)
     await prepare?.(ctx)
     stage = 'plugin tree failed to load'
-    await mountRootInclude(ctx, absoluteConfigPath, patches, bareModuleBaseUrl)
+    await mountRootInclude(ctx, absoluteConfigPath, patches, bareModuleBaseUrl, bareModuleImporter)
     // A surface can finish and dispose the whole tree while startup is still
     // in flight, before the last entry settles. The Loader service goes with
     // it, and the activation audit describes a live tree — reading `ctx.loader`
@@ -796,7 +830,11 @@ export async function boot(
     // original activation error instead of only the wrap chain.
     let deepest: unknown = cause
     while (deepest instanceof Error && deepest.cause !== undefined) deepest = deepest.cause
-    const stack = deepest instanceof Error && deepest !== cause ? `\n${deepest.stack ?? deepest.message}` : ''
+    const topStack = cause instanceof Error ? cause.stack : undefined
+    const nested = formatNestedErrors(cause).filter(detail => detail !== topStack)
+    const stack = nested.length > 0
+      ? `\n${nested.join('\n')}`
+      : deepest instanceof Error && deepest !== cause ? `\n${deepest.stack ?? deepest.message}` : ''
     throw new Error(`${binName}: ${stage}: ${detail}${stack}`, { cause })
   }
 }

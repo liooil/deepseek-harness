@@ -25,7 +25,11 @@ it('boots the source worker without workspace package outputs', async () => {
       execArgv: [],
     })
     const message = await new Promise<unknown>((resolve, reject) => {
-      worker?.once('message', resolve)
+      worker?.on('message', (candidate: unknown) => {
+        if (typeof candidate === 'object' && candidate !== null && (candidate as { type?: unknown }).type === 'done') {
+          resolve(candidate)
+        }
+      })
       worker?.once('error', reject)
     })
 

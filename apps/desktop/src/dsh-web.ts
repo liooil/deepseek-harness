@@ -1,162 +1,242 @@
 import { createRequire } from 'node:module'
-import { dirname, join, resolve } from 'node:path'
-import { extractDshWebUrl } from './readiness.ts'
+import { constants, existsSync, globSync } from 'node:fs'
+import { access, readFile, readdir } from 'node:fs/promises'
+import { delimiter, dirname, join, resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
+import { loadLayeredEnv, type DshRuntimePaths } from '@deepseek-ai/dsh-app-boot'
+import { runProfile } from '@deepseek-ai/dsh/profile-boot'
+import { detectImage } from '@deepseek-ai/dsh-attachment-local/src/image.ts'
+import { configureRipgrepPath, resolveRgPath } from '@deepseek-ai/dsh-tool-fs-search/src/search-core.ts'
+import { verifyWorkflowWorkerEntry } from '@deepseek-ai/dsh-workflow-worker-thread'
+import { dlopen, FFIType } from 'bun:ffi'
 import { type EmbeddedDshRuntime, materializeDshRuntime } from './runtime-cache.ts'
 
-const STARTUP_TIMEOUT_MS = 60_000
-const SHUTDOWN_TIMEOUT_MS = 6_000
-
 let embeddedRuntime: EmbeddedDshRuntime | undefined
+let compiledPluginImporter: ((name: string) => unknown) | undefined
+let sharpNativeLibrary: ReturnType<typeof dlopen> | undefined
+let sourceWorkspacePackages: Promise<Map<string, { root: string; manifest: WorkspaceManifest }>> | undefined
+
+interface WorkspaceManifest {
+  readonly name?: string
+  readonly main?: string
+  readonly exports?: string | Record<string, unknown>
+}
 
 export interface DshWebSession {
   readonly url: URL
   readonly exited: Promise<number>
   readonly exitCode: number | null
+  /** Exercise Bun-hosted code and workflow worker threads without an LLM call. */
+  verifyRuntime(): Promise<void>
   stop(): Promise<number>
 }
 
-export function configureEmbeddedDshRuntime(runtime: EmbeddedDshRuntime): void {
+export function configureEmbeddedDshRuntime(
+  runtime: EmbeddedDshRuntime,
+  importer: (name: string) => unknown,
+): void {
   embeddedRuntime = runtime
+  compiledPluginImporter = importer
 }
 
 export function embeddedDshRuntimeVersion(): string | undefined {
   return embeddedRuntime?.version
 }
 
-async function resolveDshBin(): Promise<string> {
-  const require = createRequire(import.meta.url)
-  const manifest = require.resolve('@deepseek-ai/dsh/package.json')
-  const bin = join(dirname(manifest), 'lib', 'bin.js')
-  if (!await Bun.file(bin).exists()) {
-    throw new Error(`DeepSeek Harness is not built (${bin} is missing); run pnpm run build first`)
+async function resolveRuntime(): Promise<{
+  installAnchor: string
+  shippedPresetRoot: string
+  runtimePaths?: DshRuntimePaths
+}> {
+  const materialized = embeddedRuntime === undefined ? undefined : await materializeDshRuntime(embeddedRuntime)
+  if (materialized?.extracted) {
+    console.info(`dsh-desktop: extracted embedded runtime data to ${materialized.root}`)
   }
-  return bin
-}
-
-async function resolveDshCommand(): Promise<string[]> {
-  if (embeddedRuntime) {
-    const runtime = await materializeDshRuntime(embeddedRuntime)
-    if (runtime.extracted) console.info(`dsh-desktop: extracted embedded runtime to ${runtime.root}`)
-    return [runtime.node, runtime.dshBin]
-  }
-
-  const node = Bun.which('node')
-  if (!node) throw new Error('Node.js is required to run DeepSeek Harness')
-  return [node, await resolveDshBin()]
-}
-
-async function consumeLines(
-  stream: ReadableStream<Uint8Array>,
-  output: NodeJS.WriteStream,
-  onLine: (line: string) => void,
-): Promise<void> {
-  const reader = stream.getReader()
-  const decoder = new TextDecoder()
-  let pending = ''
-  while (true) {
-    const { done, value } = await reader.read()
-    const text = decoder.decode(value, { stream: !done })
-    if (text) {
-      output.write(text)
-      pending += text
-      let newline = pending.indexOf('\n')
-      while (newline >= 0) {
-        onLine(pending.slice(0, newline).replace(/\r$/, ''))
-        pending = pending.slice(newline + 1)
-        newline = pending.indexOf('\n')
-      }
-    }
-    if (done) break
-  }
-  if (pending) onLine(pending)
-}
-
-function waitForExit(
-  exited: Promise<number>,
-  timeoutMs: number,
-): Promise<number | undefined> {
-  return new Promise((resolveExit) => {
-    const timer = setTimeout(() => {
-      resolveExit(undefined)
-    }, timeoutMs)
-    void exited.then((code) => {
-      clearTimeout(timer)
-      resolveExit(code)
+  const installAnchor = materialized?.installAnchor
+    ?? createRequire(import.meta.url).resolve('@deepseek-ai/dsh/package.json')
+  const require = createRequire(installAnchor)
+  const packageRoot = dirname(installAnchor)
+  if (materialized !== undefined) {
+    const platform = process.platform === 'win32' ? 'win32' : process.platform === 'darwin' ? 'darwin' : 'linux'
+    const nativePackage = process.platform === 'win32'
+      ? `sharp-${platform}-${process.arch}`
+      : `sharp-libvips-${platform}-${process.arch}`
+    const nativeLibraryPath = resolve(packageRoot, '../..', '@img', nativePackage, 'lib')
+    const key = process.platform === 'win32' ? 'PATH' : process.platform === 'darwin' ? 'DYLD_LIBRARY_PATH' : 'LD_LIBRARY_PATH'
+    process.env[key] = [nativeLibraryPath, process.env[key]].filter(Boolean).join(delimiter)
+    const libraryName = (await readdir(nativeLibraryPath)).find(name => /vips.*\.(?:so(?:\.|$)|dylib$|dll$)/i.test(name))
+    if (libraryName === undefined) throw new Error(`dsh-desktop: libvips library is missing from ${nativeLibraryPath}`)
+    sharpNativeLibrary ??= dlopen(join(nativeLibraryPath, libraryName), {
+      vips_init: { args: [FFIType.cstring], returns: FFIType.i32 },
     })
-  })
+    const rgPlatform = process.platform === 'win32' ? 'win32' : process.platform
+    configureRipgrepPath(resolve(
+      packageRoot,
+      '../..',
+      '@vscode',
+      `ripgrep-${rgPlatform}-${process.arch}`,
+      'bin',
+      process.platform === 'win32' ? 'rg.exe' : 'rg',
+    ))
+  }
+  return {
+    installAnchor,
+    shippedPresetRoot: join(packageRoot, 'config', 'agent-presets'),
+    ...(materialized === undefined ? {} : { runtimePaths: {
+      resolvePackageJson: packageName => require.resolve(`${packageName}/package.json`),
+      resolvePackageExport: (packageName, subpath) => require.resolve(`${packageName}/${subpath}`),
+      harnessSourceRoot: materialized.root,
+    } }),
+  }
+}
+
+function conditionalExport(value: unknown): string | undefined {
+  if (typeof value === 'string') return value
+  if (value === null || typeof value !== 'object') return undefined
+  const record = value as Record<string, unknown>
+  return conditionalExport(record.default ?? record.import ?? record.node)
+}
+
+function packageEntry(manifest: WorkspaceManifest, subpath: string): string | undefined {
+  const key = subpath === '' ? '.' : `./${subpath}`
+  if (typeof manifest.exports === 'string') return subpath === '' ? manifest.exports : undefined
+  return conditionalExport(manifest.exports?.[key]) ?? (subpath === '' ? manifest.main : undefined)
+}
+
+async function scanSourceWorkspace(): Promise<Map<string, { root: string; manifest: WorkspaceManifest }>> {
+  const sourceRoot = resolve(import.meta.dirname, '../../..')
+  const packages = new Map<string, { root: string; manifest: WorkspaceManifest }>()
+  for (const path of globSync([
+    'apps/*/package.json',
+    'packages/*/*/package.json',
+    'vendor/*/package.json',
+  ], { cwd: sourceRoot })) {
+    const manifest = JSON.parse(await readFile(resolve(sourceRoot, path), 'utf8')) as WorkspaceManifest
+    if (manifest.name !== undefined) packages.set(manifest.name, { root: dirname(resolve(sourceRoot, path)), manifest })
+  }
+  return packages
+}
+
+/** Resolve source-workspace plugins when `pnpm desktop` runs directly under Bun. */
+async function importSourcePlugin(specifier: string): Promise<unknown> {
+  sourceWorkspacePackages ??= scanSourceWorkspace()
+  const packageName = specifier.startsWith('@')
+    ? specifier.split('/').slice(0, 2).join('/')
+    : specifier.split('/')[0] ?? specifier
+  const subpath = specifier.slice(packageName.length).replace(/^\//, '')
+  const pkg = (await sourceWorkspacePackages).get(packageName)
+  if (pkg === undefined) return import(specifier)
+  const target = packageEntry(pkg.manifest, subpath)
+  if (target === undefined) throw new Error(`dsh-desktop: source plugin ${specifier} has no package export`)
+  const sourcePath = target.replace(/^\.\/lib\//, 'src/').replace(/\.js$/, '.ts')
+  const candidates = [
+    resolve(pkg.root, 'src', subpath === '' ? 'index.ts' : `${subpath}.ts`),
+    resolve(pkg.root, sourcePath),
+    resolve(pkg.root, sourcePath.replace(/\.ts$/, '/index.ts')),
+    resolve(pkg.root, target),
+  ]
+  const entry = candidates.find(existsSync)
+  if (entry === undefined) throw new Error(`dsh-desktop: source plugin ${specifier} has no loadable entry`)
+  return import(pathToFileURL(entry).href)
 }
 
 export async function startDshWeb(options: { cwd: string; port: number }): Promise<DshWebSession> {
-  const command = await resolveDshCommand()
-  const subprocess = Bun.spawn([...command, 'web', '--port', String(options.port)], {
-    cwd: resolve(options.cwd),
-    env: process.env,
-    stdin: 'ignore',
-    stdout: 'pipe',
-    stderr: 'pipe',
+  process.chdir(resolve(options.cwd))
+  const runtime = await resolveRuntime()
+  const importer = compiledPluginImporter ?? importSourcePlugin
+  const { ctx, shutdown } = await runProfile({
+    environment: loadLayeredEnv('dsh'),
+    profile: 'web',
+    patchFiles: [],
+    args: ['--port', String(options.port)],
+    installAnchor: runtime.installAnchor,
+    shippedPresetRoot: runtime.shippedPresetRoot,
+    bareModuleImporter: importer,
+    ...(runtime.runtimePaths === undefined ? {} : { runtimePaths: runtime.runtimePaths }),
+    watchPatches: false,
+    manageProcessSignals: false,
   })
-  const exited = subprocess.exited
-
-  let resolveReady: ((url: URL) => void) | undefined
-  let rejectReady: ((error: Error) => void) | undefined
-  const ready = new Promise<URL>((resolveUrl, reject) => {
-    resolveReady = resolveUrl
-    rejectReady = reject
-  })
-  const inspectLine = (line: string) => {
-    const url = extractDshWebUrl(line)
-    if (url) resolveReady?.(url)
+  const webServer = ctx.get('webServer') as { port: number } | undefined
+  if (webServer === undefined) {
+    await ctx.fiber.dispose()
+    throw new Error('dsh web started without a webServer service')
   }
-  void consumeLines(subprocess.stdout, process.stdout, inspectLine).catch((error: unknown) => {
-    rejectReady?.(error instanceof Error ? error : new Error(String(error)))
-  })
-  void consumeLines(subprocess.stderr, process.stderr, inspectLine).catch((error: unknown) => {
-    rejectReady?.(error instanceof Error ? error : new Error(String(error)))
-  })
 
-  let startupTimer: ReturnType<typeof setTimeout> | undefined
-  try {
-    const url = await Promise.race([
-      ready,
-      exited.then(code => Promise.reject(new Error(`dsh web exited before it was ready (code ${code})`))),
-      new Promise<URL>((_, reject) => {
-        startupTimer = setTimeout(
-          () => {
-            reject(new Error(`dsh web did not become ready within ${STARTUP_TIMEOUT_MS}ms`))
-          },
-          STARTUP_TIMEOUT_MS,
-        )
-      }),
-    ])
-    clearTimeout(startupTimer)
+  let exitCode: number | null = null
+  let resolveExited!: (code: number) => void
+  const exited = new Promise<number>((resolveExit) => {
+    resolveExited = resolveExit
+  })
+  ctx.effect(() => () => {
+    exitCode = 0
+    resolveExited(0)
+  }, 'dsh-desktop: observe in-process web shutdown')
 
-    let stopPromise: Promise<number> | undefined
-    return {
-      url,
-      exited,
-      get exitCode() {
-        return subprocess.exitCode
-      },
-      stop() {
-        stopPromise ??= (async () => {
-          if (subprocess.exitCode !== null) return exited
-          subprocess.kill('SIGTERM')
-          const gracefulCode = await waitForExit(exited, SHUTDOWN_TIMEOUT_MS)
-          if (gracefulCode !== undefined) return gracefulCode
-          subprocess.kill('SIGKILL')
-          return exited
-        })()
-        return stopPromise
-      },
-    }
-  } catch (error) {
-    clearTimeout(startupTimer)
-    if (subprocess.exitCode === null) subprocess.kill('SIGTERM')
-    const gracefulCode = await waitForExit(exited, SHUTDOWN_TIMEOUT_MS)
-    if (gracefulCode === undefined && subprocess.exitCode === null) {
-      subprocess.kill('SIGKILL')
-      await exited
-    }
-    throw error
+  let stopPromise: Promise<number> | undefined
+  return {
+    url: new URL(`http://127.0.0.1:${String(webServer.port)}`),
+    exited,
+    get exitCode() {
+      return exitCode
+    },
+    async verifyRuntime() {
+      const codeRuntime = ctx.get('codeRuntime') as {
+        run(request: { program: string; bindings: unknown[] }): Promise<{ value?: unknown; error?: { message: string } }>
+      } | undefined
+      if (codeRuntime === undefined) throw new Error('desktop smoke: codeRuntime service is unavailable')
+      const codeResult = await codeRuntime.run({
+        program: 'const answer: number = 6 * 7; return answer',
+        bindings: [],
+      })
+      if (codeResult.error !== undefined || codeResult.value !== 42) {
+        throw new Error(`desktop smoke: code worker failed (${codeResult.error?.message ?? String(codeResult.value)})`)
+      }
+
+      await verifyWorkflowWorkerEntry()
+      const png = Uint8Array.from(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADUlEQVQImWNgYGD4DwABBAEAfbLI3wAAAABJRU5ErkJggg==', 'base64'))
+      let image: Awaited<ReturnType<typeof detectImage>>
+      try {
+        image = await detectImage(png)
+      } catch (error) {
+        const cause = error instanceof Error && error.cause instanceof Error ? `: ${error.cause.message}` : ''
+        throw new Error(`desktop smoke: embedded sharp runtime failed${cause}`, { cause: error })
+      }
+      if (image.mediaType !== 'image/png' || image.width !== 1 || image.height !== 1) {
+        throw new Error('desktop smoke: embedded sharp runtime returned unexpected image metadata')
+      }
+      await access(await resolveRgPath(), constants.X_OK)
+      const subprocess = ctx.get('subprocess') as {
+        spawnTerminal(spec: {
+          argv: string[]
+          cwd: string
+          rows: number
+          cols: number
+          graceMs: number
+        }): Promise<{
+          output: NodeJS.ReadableStream
+          done: Promise<{ exitCode: number | null }>
+          terminate(): Promise<void>
+        }>
+      } | undefined
+      if (subprocess === undefined) throw new Error('desktop smoke: subprocess service is unavailable')
+      const argv = process.platform === 'win32'
+        ? [process.env.COMSPEC ?? 'cmd.exe', '/d', '/s', '/c', 'echo DSH_BUN_TERMINAL_OK']
+        : ['/bin/sh', '-c', 'printf DSH_BUN_TERMINAL_OK']
+      const terminal = await subprocess.spawnTerminal({ argv, cwd: options.cwd, rows: 24, cols: 80, graceMs: 1_000 })
+      let terminalOutput = ''
+      terminal.output.on('data', (chunk) => { terminalOutput += String(chunk) })
+      try {
+        const outcome = await terminal.done
+        if (outcome.exitCode !== 0 || !terminalOutput.includes('DSH_BUN_TERMINAL_OK')) {
+          throw new Error(`desktop smoke: Bun terminal failed (exit=${String(outcome.exitCode)}, output=${JSON.stringify(terminalOutput)})`)
+        }
+      } finally {
+        await terminal.terminate()
+      }
+    },
+    stop() {
+      stopPromise ??= shutdown.shutdown(0).then(async () => exited)
+      return stopPromise
+    },
   }
 }

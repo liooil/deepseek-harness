@@ -750,6 +750,9 @@
       "project": [
         "src/**/*.ts",
         "tests/**/*.ts"
+      ],
+      "ignoreDependencies": [
+        "sharp"
       ]
     },
     "packages/client/modules": {

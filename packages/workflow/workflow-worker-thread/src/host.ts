@@ -23,6 +23,65 @@ import { HostToWorkerType, WorkerToHostType } from './protocol.ts'
 import type { HostToWorkerPayloads, WorkerToHostMessage } from './protocol.ts'
 import type { ChildResult, ChildStartRequest, WorkerInit } from './types.ts'
 
+/** Bun compile needs a statically visible worker URL to embed the entry. */
+const IS_BUN = typeof process.versions.bun === 'string'
+
+/** Bun standalone hosts supply the separately embedded worker entry here. */
+let embeddedBunWorkerEntry: string | URL | undefined
+
+/**
+ * Configure the workflow worker asset embedded by a Bun standalone host.
+ * @param entry - compiled worker file URL or path supplied by the host.
+ */
+export function configureWorkflowWorkerEntry(entry: string | URL): void {
+  embeddedBunWorkerEntry = entry
+}
+
+/** Exercise the Bun worker entry without starting subagents. */
+export async function verifyWorkflowWorkerEntry(): Promise<void> {
+  if (!IS_BUN) throw new Error('workflow worker verification requires a Bun host')
+  const entry = embeddedBunWorkerEntry ?? new URL('./worker.ts', import.meta.url)
+  const worker = new Worker(entry, {
+    workerData: {
+      meta: { name: 'desktop-smoke', description: 'Verify the embedded workflow worker.' },
+      body: 'return { answer: 6 * 7 }',
+      limits: {
+        maxConcurrentAgents: 1,
+        maxTotalAgents: 1,
+        maxItemsPerCall: 1,
+        syncTimeoutMs: 5_000,
+      },
+    } satisfies WorkerInit,
+    env: workerSpawnEnv(),
+    execArgv: [],
+  })
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => { reject(new Error('workflow worker verification timed out')) }, 10_000)
+      const finish = (outcome: () => void): void => {
+        clearTimeout(timer)
+        outcome()
+      }
+      worker.on('message', (message: WorkerToHostMessage) => {
+        if (message.type === WorkerToHostType.Ready) {
+          worker.postMessage({ type: HostToWorkerType.Go })
+          return
+        }
+        if (message.type !== WorkerToHostType.Result) return
+        const value = message.result.value as { answer?: unknown } | undefined
+        if (message.result.stopReason === 'completed' && value?.answer === 42) finish(resolve)
+        else finish(() => { reject(new Error(`workflow worker verification failed (${message.result.stopReason})`)) })
+      })
+      worker.on('error', (error) => { finish(() => { reject(error) }) })
+      worker.on('exit', (code) => {
+        if (code !== 0) finish(() => { reject(new Error(`workflow worker verification exited with code ${code}`)) })
+      })
+    })
+  } finally {
+    await worker.terminate()
+  }
+}
+
 /** One published child and its shared quiescent-disposal transaction. */
 interface ChildRecord {
   readonly run: SubagentRun
@@ -145,8 +204,16 @@ export class WorkerRun implements WorkflowRun {
     // workerData rides the structured clone: args are plain JSON by the seam
     // contract, so the clone is total and doubles as the caller-isolation
     // copy (a clone failure throws loud out of start()).
-    const { entry, options } = resolveWorkerSpawn(init)
-    this.worker = new Worker(entry, options)
+    if (IS_BUN) {
+      this.worker = new Worker(embeddedBunWorkerEntry ?? new URL('./worker.ts', import.meta.url), {
+        workerData: init,
+        env: workerSpawnEnv(),
+        execArgv: [],
+      })
+    } else {
+      const { entry, options } = resolveWorkerSpawn(init)
+      this.worker = new Worker(entry, options)
+    }
     this.worker.on('message', (message: WorkerToHostMessage) => { this.onMessage(message) })
     this.worker.on('error', (error) => { this.onWorkerDeath(`workflow worker failed: ${renderThrown(error)}`, false) })
     /* v8 ignore next -- messageerror: not constructible from the engine's own protocol (every payload is JSON data) */

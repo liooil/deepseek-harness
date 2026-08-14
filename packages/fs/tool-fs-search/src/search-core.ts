@@ -154,6 +154,16 @@ function completeStdout(toolName: string, stdout: SubprocessOutputRead, rawOutpu
 }
 
 let rgPathPromise: Promise<string> | undefined
+let packagedRgPath: string | undefined
+
+/**
+ * Supply the extracted platform binary path for a closed Bun executable.
+ * @param path - absolute path to the host-owned ripgrep executable.
+ */
+export function configureRipgrepPath(path: string): void {
+  packagedRgPath = path
+  rgPathPromise = undefined
+}
 
 /**
  * The packaged ripgrep binary path, resolved lazily once per process.
@@ -169,7 +179,9 @@ let rgPathPromise: Promise<string> | undefined
  *   when the platform package cannot be resolved.
  */
 export function resolveRgPath(): Promise<string> {
-  rgPathPromise ??= import('@vscode/ripgrep').then(module => module.rgPath)
+  rgPathPromise ??= packagedRgPath === undefined
+    ? import('@vscode/ripgrep').then(module => module.rgPath)
+    : Promise.resolve(packagedRgPath)
   return rgPathPromise
 }
 

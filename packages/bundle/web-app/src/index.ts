@@ -134,12 +134,18 @@ export const internals: { resolveDistIndex: () => string } = { resolveDistIndex 
  */
 export function apply(ctx: Context, config: Config): void {
   const runtime = resolveLanTrust(ctx.webServer.host, config.trustedHosts)
+  const runtimePaths = ctx.get('dshRuntimePaths')
+  const distIndex = runtimePaths?.resolvePackageExport(
+    '@deepseek-ai/dsh-web-frontend',
+    'dist/index.html',
+  ) ?? internals.resolveDistIndex()
+  const harnessSourceRoot = runtimePaths?.harnessSourceRoot ?? SOURCE_ROOT
   // Release dependent rows only after bind-dependent trust has been sampled once.
   ctx.provide(WEB_RUNTIME_SERVICE, runtime)
-  ctx.plugin(FrontendStatic, { distIndex: internals.resolveDistIndex() })
+  ctx.plugin(FrontendStatic, { distIndex })
   if (config.surfaceContext) {
     ctx.inject(['systemPrompt'], (promptCtx) => {
-      addHarnessSourceSection(promptCtx, SOURCE_ROOT)
+      addHarnessSourceSection(promptCtx, harnessSourceRoot)
       promptCtx.systemPrompt.section({
         name: 'app:web-surface',
         order: -98,

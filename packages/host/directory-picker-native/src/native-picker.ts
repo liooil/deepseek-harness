@@ -1,7 +1,6 @@
 /** Cross-platform native single-directory chooser behind the native backend's capability. */
 
 import { runNativeCommand, type NativeCommandRunner } from '@deepseek-ai/dsh-native-command'
-import { pickWin32Directory } from './win32-dialog.ts'
 
 /** Testable command boundary; native implementations never invoke a shell. */
 export type DirectoryPickerRunner = NativeCommandRunner
@@ -72,7 +71,9 @@ export async function pickNativeDirectory(
     // whose availability the install guarantees, so there is no fallback
     // tier: any failure surfaces as-is (no PowerShell fallback tier; see
     // .agents/notes/implemented/simplification/2026-08-04-drop-windows-powershell-picker-fallback.md).
-    const pickDialog = internals.pickWin32Dialog ?? pickWin32Directory
+    const win32Module: string = './win32-dialog.ts'
+    const pickDialog = internals.pickWin32Dialog
+      ?? (await import(win32Module) as typeof import('./win32-dialog.ts')).pickWin32Directory
     return await pickDialog(signal)
   }
 

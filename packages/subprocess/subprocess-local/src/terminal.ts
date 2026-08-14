@@ -1,9 +1,8 @@
-/** Local node-pty terminal-process implementation for the subprocess seam. */
+/** Local terminal-process implementation for the subprocess seam. */
 
 import { Buffer } from 'node:buffer'
 import { constants } from 'node:os'
 import { PassThrough } from 'node:stream'
-import type { IDisposable, IPty } from 'node-pty'
 import type {
   SubprocessOutcome,
   SubprocessTerminalForeground,
@@ -11,6 +10,17 @@ import type {
   SubprocessTerminalSignal,
 } from '@deepseek-ai/dsh-subprocess'
 import type { ProcessIdentity, ProcessInspector } from './process-inspector.ts'
+
+/** Subscription disposer returned by either local PTY backend. */
+export interface TerminalDisposable { dispose(): void }
+/** Runtime-neutral terminal backend implemented by Bun.Terminal or node-pty. */
+export interface TerminalBackend {
+  readonly pid: number
+  write(data: string): void
+  kill(signal: string): void
+  onData(callback: (data: string) => void): TerminalDisposable
+  onExit(callback: (event: { exitCode: number; signal?: number }) => void): TerminalDisposable
+}
 
 function delay(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms))
@@ -28,7 +38,7 @@ function signalName(number: number | undefined): NodeJS.Signals | null {
  * A local terminal whose process-session ownership stays below the PTY backend.
  * The seam's terminate() promise — no write, inspection, or signal in flight
  * after settlement — holds here without operation tracking only because every
- * handle call completes synchronously under the hood (node-pty write, ps-based
+ * handle call completes synchronously under the hood (PTY write, ps-based
  * inspection). A first genuinely asynchronous step in any handle call must add
  * the tracking a remote provider needs.
  */
@@ -38,8 +48,8 @@ export class LocalTerminalHandle implements SubprocessTerminalHandle {
   readonly done: Promise<SubprocessOutcome>
 
   private readonly outcome = Promise.withResolvers<SubprocessOutcome>()
-  private readonly dataDisposable: IDisposable
-  private readonly exitDisposable: IDisposable
+  private readonly dataDisposable: TerminalDisposable
+  private readonly exitDisposable: TerminalDisposable
   private cleanup: Promise<void> | undefined
   private exited = false
   private trackedDescendants: ProcessIdentity[] = []
@@ -47,12 +57,12 @@ export class LocalTerminalHandle implements SubprocessTerminalHandle {
   private readonly rootIdentity: ProcessIdentity | undefined
 
   /**
-   * @param terminal - allocated node-pty process.
+   * @param terminal - allocated Bun.Terminal or node-pty backend.
    * @param inspector - platform process/session operations.
    * @param graceMs - TERM-to-KILL and exit-wait grace.
    */
   constructor(
-    private readonly terminal: IPty,
+    private readonly terminal: TerminalBackend,
     private readonly inspector: ProcessInspector,
     private readonly graceMs: number,
   ) {
@@ -71,7 +81,7 @@ export class LocalTerminalHandle implements SubprocessTerminalHandle {
     })
   }
 
-  // node-pty writes synchronously; the seam returns a promise for remote transports.
+  // Both local PTY backends write synchronously; the seam returns a promise for remote transports.
   // oxlint-disable-next-line typescript/require-await -- Preserve promise rejection semantics at the async provider contract.
   async write(data: string): Promise<void> {
     if (this.exited) throw new Error('terminal process has exited')
@@ -133,7 +143,7 @@ export class LocalTerminalHandle implements SubprocessTerminalHandle {
     try {
       this.terminal.kill('SIGKILL')
     } catch (_unidentifiedShellExitedDuringHostExit) {
-      // Without a captured identity, node-pty is the only root kill primitive.
+      // Without a captured identity, the PTY backend is the only root kill primitive.
     }
   }
 

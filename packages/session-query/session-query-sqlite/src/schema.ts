@@ -49,8 +49,8 @@ export async function openSearchDatabase(path: string, journalMode: JournalMode)
     await mkdir(dirname(actual), { recursive: true, mode: 0o700 })
     await createDatabaseFile(actual)
   }
-  const { DatabaseSync } = await import('node:sqlite')
-  const db = new DatabaseSync(actual)
+  const Database = await databaseConstructor()
+  const db = new Database(actual)
   try {
     const { application_id: applicationId } = db.prepare('PRAGMA application_id').get() as { application_id: number }
     const { user_version: version } = db.prepare('PRAGMA user_version').get() as { user_version: number }
@@ -75,6 +75,17 @@ export async function openSearchDatabase(path: string, journalMode: JournalMode)
     db.close()
     throw error
   }
+}
+
+async function databaseConstructor(): Promise<typeof DatabaseSync> {
+  if (process.versions.bun !== undefined) {
+    const specifier: string = 'bun:sqlite'
+    const module = await import(specifier) as { Database: unknown }
+    return module.Database as typeof DatabaseSync
+  }
+  const specifier: string = 'node:sqlite'
+  const module = await import(specifier) as { DatabaseSync: typeof DatabaseSync }
+  return module.DatabaseSync
 }
 
 function listUserTables(db: DatabaseSync): string[] {

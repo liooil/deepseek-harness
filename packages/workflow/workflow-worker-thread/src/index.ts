@@ -17,6 +17,7 @@ import { WorkerRun } from './host.ts'
 import { validateMeta } from './meta.ts'
 import type { WorkerInit, WorkerLimits } from './types.ts'
 
+export { configureWorkflowWorkerEntry, verifyWorkflowWorkerEntry } from './host.ts'
 export { validateMeta } from './meta.ts'
 export { materializeFromRealm, MaterializeError } from './realm.ts'
 export type {

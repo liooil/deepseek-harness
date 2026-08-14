@@ -1,6 +1,7 @@
 /** Raster inspection: full decode at admission, header-only probe on verified reads. */
 
-import sharp, { type Sharp } from 'sharp'
+import type sharp from 'sharp'
+import type { Sharp } from 'sharp'
 import { AttachmentError } from '@deepseek-ai/dsh-attachment'
 import type { ImageMediaType } from '@deepseek-ai/dsh-attachment'
 
@@ -16,6 +17,21 @@ const MEDIA_TYPES: Readonly<Record<string, ImageMediaType>> = {
   jpeg: 'image/jpeg',
   webp: 'image/webp',
   gif: 'image/gif',
+}
+
+type SharpFactory = typeof sharp
+let loadSharp: () => Promise<SharpFactory> = async () => {
+  const packageName: string = 'sharp'
+  const module = await import(packageName) as unknown as { default: SharpFactory }
+  return module.default
+}
+
+/**
+ * Supply a packaged native-image loader without statically bundling Sharp's addon.
+ * @param loader - lazy host-owned factory resolving the usable Sharp export.
+ */
+export function configureSharpLoader(loader: () => Promise<SharpFactory>): void {
+  loadSharp = loader
 }
 
 async function imageMetadata(image: Sharp): Promise<DetectedImage> {
@@ -37,6 +53,7 @@ async function imageMetadata(image: Sharp): Promise<DetectedImage> {
  */
 export async function probeImage(data: Uint8Array): Promise<DetectedImage> {
   try {
+    const sharp = await loadSharp()
     return await imageMetadata(sharp(data, { failOn: 'error', limitInputPixels: false }))
   } catch (error) {
     if (error instanceof AttachmentError) throw error
@@ -52,6 +69,7 @@ export async function probeImage(data: Uint8Array): Promise<DetectedImage> {
  */
 export async function detectImage(data: Uint8Array, maxPixels?: number): Promise<DetectedImage> {
   try {
+    const sharp = await loadSharp()
     const image = sharp(data, { failOn: 'error', limitInputPixels: false })
     const detected = await imageMetadata(image)
     if (maxPixels !== undefined && detected.width * detected.height > maxPixels) {

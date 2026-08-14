@@ -642,6 +642,35 @@ describe('boot', () => {
     }
   })
 
+  it('loads bare entries through an injected compiled-module importer', async () => {
+    const dir = tmp()
+    writeFileSync(join(dir, 'relative.mjs'), 'export function apply(ctx) { ctx.provide("relativePluginLoaded", true) }\n')
+    writeFileSync(join(dir, 'cordis.yml'), [
+      '- id: compiled',
+      '  name: "@fixture/compiled-plugin"',
+      '- id: relative',
+      '  name: ./relative.mjs',
+      '',
+    ].join('\n'))
+    const imported: string[] = []
+    const ctx = await boot(NAME, join(dir, 'cordis.yml'), undefined, undefined, undefined, (name) => {
+      imported.push(name)
+      if (name !== '@fixture/compiled-plugin') throw new Error(`unexpected compiled import ${name}`)
+      return Promise.resolve({
+        apply(pluginCtx: Context) {
+          pluginCtx.provide('compiledPluginLoaded', true)
+        },
+      })
+    })
+    try {
+      expect(imported).toEqual(['@fixture/compiled-plugin'])
+      expect(ctx.get('compiledPluginLoaded')).toBe(true)
+      expect(ctx.get('relativePluginLoaded')).toBe(true)
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
+
   it('disposes partial host setup and labels non-Error preparation failures', async () => {
     const dir = tmp()
     const failure = 42
