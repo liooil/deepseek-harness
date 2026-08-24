@@ -14,17 +14,8 @@
   "bin": {
     "dsh": "lib/bin.js"
   },
-  "exports": {
-    ".": "./lib/bin.js",
-    "./profile-boot": {
-      "types": "./lib/types/profile-boot.d.ts",
-      "default": "./lib/profile-boot.js"
-    },
-    "./package.json": "./package.json"
-  },
   "files": [
     "lib/*.js",
-    "lib/types/profile-boot.d.ts",
     "config"
   ],
   "license": "MIT",
@@ -68,6 +59,7 @@
     "@deepseek-ai/dsh-tool-ask-user": "workspace:^",
     "@deepseek-ai/dsh-tool-bash": "workspace:^",
     "@deepseek-ai/dsh-tool-bash-persistent": "workspace:^",
+    "@deepseek-ai/dsh-tool-pwsh-persistent": "workspace:^",
     "@deepseek-ai/dsh-tool-cordis": "workspace:^",
     "@deepseek-ai/dsh-tool-fs": "workspace:^",
     "@deepseek-ai/dsh-tool-fs-search": "workspace:^",

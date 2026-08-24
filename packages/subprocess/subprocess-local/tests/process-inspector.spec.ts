@@ -5,6 +5,7 @@ import {
   parseProcStat,
 } from '@deepseek-ai/dsh-subprocess-local/src/process-inspector.ts'
 import type { ProcessInspectorInternals } from '@deepseek-ai/dsh-subprocess-local/src/process-inspector.ts'
+import { WindowsProcessInspector } from '@deepseek-ai/dsh-subprocess-local/src/windows-inspector.ts'
 
 function stat(pid: number, pgrp: number, session: number, tpgid: number, started: string, parentPid = 1, state = 'S'): string {
   const rest = [state, String(parentPid), String(pgrp), String(session), '99', String(tpgid)]
@@ -237,31 +238,13 @@ describe('macOS process inspector', () => {
     ])
   })
 
-  it('returns undefined for missing or invalid foreground groups', () => {
+  it('returns undefined for missing or invalid foreground groups and dispatches platform inspectors', () => {
     const fake = fakeInternals()
     fake.setTpgid('-1')
     expect(createProcessInspector('darwin', 'arm64', fake.internals).foregroundPgid(1)).toBeUndefined()
     fake.internals.exec = () => { throw new Error('gone') }
     expect(createProcessInspector('darwin', 'arm64', fake.internals).foregroundPgid(1)).toBeUndefined()
-  })
-})
-
-describe('Windows process inspector', () => {
-  it('delegates terminal lifetime to the PTY backend without inventing POSIX groups', () => {
-    const fake = fakeInternals()
-    const inspector = createProcessInspector('win32', 'x64', fake.internals)
-    expect(inspector.foregroundPgid(10)).toBeUndefined()
-    expect(inspector.isStdinWaiting(10)).toBe(false)
-    expect(inspector.processTree(10)).toEqual([])
-    expect(inspector.processSession(10)).toEqual([])
-    expect(inspector.isAlive({ pid: 10, started: 'unused' })).toBe(false)
-    expect(() => { inspector.signalGroup(10, 'SIGINT') }).toThrow('foreground signalling is unsupported')
-    inspector.signalProcess({ pid: 10, started: 'unused' }, 'SIGKILL')
-    expect(fake.kills).toEqual([])
-  })
-
-  it('still rejects platforms without a PTY ownership model', () => {
-    const fake = fakeInternals()
-    expect(() => { createProcessInspector('freebsd', 'x64', fake.internals) }).toThrow('unsupported on platform freebsd')
+    expect(createProcessInspector('win32', 'x64', fake.internals)).toBeInstanceOf(WindowsProcessInspector)
+    expect(() => createProcessInspector('freebsd', 'x64', fake.internals)).toThrow('unsupported on platform freebsd')
   })
 })
