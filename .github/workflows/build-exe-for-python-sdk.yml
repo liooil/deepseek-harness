@@ -1,11 +1,11 @@
 name: Build single-exe
 
-# Native builds for the release targets; see
+# Native builds for the internal Python runtime checks; see
 # .agents/notes/implemented/architecture/2026-07-10-single-file-executable-sdk-runtime-distribution.md.
 # A full target run retains one SDK wheel and three runtime wheels; subset
 # dispatch retains the SDK wheel and selected runtime wheels. Bare executables
 # and source closures are test inputs. Run manually, label a PR `build-exe`
-# (remove and reapply to rerun), or call it from the Python release workflow.
+# (remove and reapply to rerun), or call it from CI.
 # Checkout uses the triggering ref, so dispatch needs no separate ref input.
 on:
   workflow_call:
@@ -15,11 +15,6 @@ on:
         type: string
         required: false
         default: ''
-      release:
-        description: Run as the native builder for the Python release workflow.
-        type: boolean
-        required: false
-        default: false
       ci:
         description: Run as the required Linux x64 Python runtime pull-request check.
         type: boolean
@@ -41,7 +36,7 @@ on:
 concurrency:
   # Keep the called workflow distinct from its caller's concurrency group;
   # github.workflow identifies the caller inside a reusable workflow and keeps
-  # an ordinary CI run from cancelling a full release validation on the same ref.
+  # an ordinary CI run from cancelling a full runtime validation on the same ref.
   group: build-single-exe-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
@@ -58,7 +53,7 @@ jobs:
   # construct the matrix before the dependent jobs.
   plan:
     name: plan targets
-    if: inputs.ci || inputs.release || github.event_name == 'workflow_dispatch' || github.event.label.name == 'build-exe'
+    if: inputs.ci || github.event_name == 'workflow_dispatch' || github.event.label.name == 'build-exe'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -129,7 +124,7 @@ jobs:
       - name: Install Python build tooling
         run: python -m pip install uv==0.11.23
 
-      - name: Build release-shaped SDK wheel
+      - name: Build local SDK wheel for validation
         run: >-
           python scripts/build-python-release.py
           --package sdk
@@ -250,7 +245,7 @@ jobs:
           --scenario all
           --exe "${{ steps.runtime.outputs.exe }}"
 
-      - name: Build release-shaped runtime wheel
+      - name: Build local runtime wheel for validation
         run: >-
           python scripts/build-python-release.py
           --package runtime

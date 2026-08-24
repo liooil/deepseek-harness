@@ -294,13 +294,13 @@ jobs:
       - name: Run complete keyless Python suite
         run: uv run --python 3.10 --group test --project python/sdk pytest
 
-  # One native target makes the complete release-shaped Python path required
-  # without duplicating platform-independent behavior across the release matrix.
+  # One native target makes the complete packaged Python runtime path required
+  # without duplicating platform-independent behavior across the CI matrix.
   # The reusable builder owns the executable, snapshot, wheel, clean-install,
-  # GLIBC, and manylinux checks; release validation retains all native targets.
+  # GLIBC, and manylinux checks; manual validation can retain all native targets.
   python-runtime:
     if: github.event_name == 'pull_request'
-    name: python runtime / release-shaped Linux x64
+    name: python runtime / packaged Linux x64
     uses: ./.github/workflows/build-exe-for-python-sdk.yml
     with:
       targets: node24-linux-x64

@@ -73,7 +73,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build workspace
-        run: pnpm run build
+        run: pnpm run build:official
 
       # The deploy step runs package install scripts again. The builder restores
       # this source add-on afterward so the release keeps a glibc 2.28 floor.

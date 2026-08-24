@@ -27,6 +27,7 @@
     "**/*.js",
     "**/*.mjs",
     "**/*.config.ts", // Tool and app configs are outside the repository TypeScript programs.
+    "apps/desktop/src/standalone.ts", // Release-only entry imports generated modules and is compiled by build-desktop-executable.
     "packages/client/tsdown.client.ts" // Shared client build preset, also outside a TypeScript program.
   ],
   "overrides": [

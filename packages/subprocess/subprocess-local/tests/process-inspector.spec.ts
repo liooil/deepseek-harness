@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   createProcessInspector,
+  createRuntimeProcessInspector,
   linuxProcessGroupHasLiveMembers,
   parseProcStat,
 } from '@deepseek-ai/dsh-subprocess-local/src/process-inspector.ts'
@@ -238,13 +239,13 @@ describe('macOS process inspector', () => {
     ])
   })
 
-  it('returns undefined for missing or invalid foreground groups and dispatches platform inspectors', () => {
+  it('returns undefined for missing or invalid foreground groups and dispatches platform inspectors', async () => {
     const fake = fakeInternals()
     fake.setTpgid('-1')
     expect(createProcessInspector('darwin', 'arm64', fake.internals).foregroundPgid(1)).toBeUndefined()
     fake.internals.exec = () => { throw new Error('gone') }
     expect(createProcessInspector('darwin', 'arm64', fake.internals).foregroundPgid(1)).toBeUndefined()
-    expect(createProcessInspector('win32', 'x64', fake.internals)).toBeInstanceOf(WindowsProcessInspector)
+    expect(await createRuntimeProcessInspector('win32', 'x64', fake.internals)).toBeInstanceOf(WindowsProcessInspector)
     expect(() => createProcessInspector('freebsd', 'x64', fake.internals)).toThrow('unsupported on platform freebsd')
   })
 })

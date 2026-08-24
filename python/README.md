@@ -1,4 +1,4 @@
-# DeepSeek Harness Python SDK
+# DeepSeek Harness Python SDK (Internal)
 
 English | [中文](README.zh.md)
 
@@ -17,4 +17,4 @@ The SDK starts the matching bundled runtime unless the caller selects an explici
 
 ## Contributor workflows
 
-The [Python contributor workflows](development.md) cover building runtime artifacts, validating the packages, source-mode development, and distribution.
+This fork does not publish these packages to PyPI. The [Python contributor workflows](development.md) cover building runtime artifacts, validating the packages, source-mode development, and local wheel artifacts. End users should use the desktop binary from the [GitHub Releases](https://github.com/liooil/deepseek-harness/releases) page.

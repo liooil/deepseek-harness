@@ -54,7 +54,7 @@ class RuntimeBuildHook(BuildHookInterface):
             return
         if self.target_name == "sdist":
             raise RuntimeError(
-                "deepseek-harness-runtime-bin is wheel-only; build and publish platform wheels only."
+                "deepseek-harness-runtime-bin is wheel-only; build platform wheels for local or CI validation only."
             )
 
         platform_tag = os.environ.get("DSH_RUNTIME_PLATFORM_TAG") or _host_platform_tag()

@@ -390,7 +390,7 @@ class DesktopExecutableBuild {
       outfile: this.cli.target.output,
       target: this.cli.target.bunTarget,
       minify: true,
-      plugins: [this.sharpBindingPlugin()],
+      plugins: [this.sharpBindingPlugin(), this.koffiBindingPlugin()],
       define: {
         DSH_DESKTOP_RUNTIME_SHA256: JSON.stringify(runtimeSha256),
         DSH_DESKTOP_VERSION: JSON.stringify(version),
@@ -427,6 +427,23 @@ class DesktopExecutableBuild {
       setup(builder) {
         builder.onLoad({ filter: /[/\\]sharp[/\\]dist[/\\]sharp\.mjs$/ }, () => ({
           contents: `import binding from ${JSON.stringify(addonPath)}; export default binding`,
+          loader: 'js',
+        }))
+      },
+    }
+  }
+
+  private koffiBindingPlugin(): BunBuildPlugin {
+    const nativePackageModule = resolve(root, 'apps/desktop/src/native-package.ts')
+    return {
+      name: 'dsh-desktop-koffi-binding',
+      setup(builder) {
+        builder.onLoad({ filter: /[/\\]koffi[/\\]index\.(?:c?js)$/ }, () => ({
+          contents: [
+            `import { loadDesktopNativePackage } from ${JSON.stringify(nativePackageModule)}`,
+            "export default loadDesktopNativePackage('koffi')",
+            '',
+          ].join('\n'),
           loader: 'js',
         }))
       },

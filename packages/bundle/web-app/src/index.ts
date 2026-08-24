@@ -88,11 +88,11 @@ function launchedThroughSsh(ctx: Context): boolean {
   })
 }
 
-const BROWSER_OPENER_MODULE = import.meta.resolve('open')
-
-const BROWSER_OPENER_PROGRAM = `
+function browserOpenerProgram(): string {
+  const browserOpenerModule = import.meta.resolve('open')
+  return `
 try {
-  const { default: open } = await import(${JSON.stringify(BROWSER_OPENER_MODULE)})
+  const { default: open } = await import(${JSON.stringify(browserOpenerModule)})
   const launcher = await open(process.argv[1])
   if (process.platform === 'win32') {
     // open resolves at PowerShell spawn; keep it referenced until that launcher hands the URL to Windows.
@@ -118,6 +118,7 @@ try {
   process.exitCode = 1
 }
 `
+}
 
 /**
  * Resolve one LAN-trust snapshot from the active server bind.
@@ -174,7 +175,7 @@ function resolveDistIndex(): string {
 function spawnBrowserLauncher(url: string): ChildProcess {
   return spawn(process.execPath, [
     '--input-type=module',
-    '--eval', BROWSER_OPENER_PROGRAM,
+    '--eval', browserOpenerProgram(),
     '--', url,
   ], {
     env: scrubbedParentEnv(),

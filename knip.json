@@ -9,7 +9,6 @@
     "musl-gcc",
     "python3",
     "sandbox-exec",
-    "tar",
     "taskkill",
     "where.exe"
   ],
@@ -643,6 +642,7 @@
     "apps/desktop": {
       "entry": [
         "src/bin.ts",
+        "src/native-package.ts",
         "src/standalone.ts",
         "tests/**/*.spec.ts",
         "tests/**/*.snapshot.ts"

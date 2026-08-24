@@ -172,9 +172,8 @@ dsh plugin --profile demo add github:you/hello-plugin
 
 请如实看待这项授权：**允许该包的代码在安装时于你的机器上执行**，且不在 agent 运行的任何沙箱之内。只对源码可信的包授权，并锁定 commit（`github:you/hello-plugin#<sha>`），让后续推送无法悄悄改变实际运行的内容。
 
-如果不想让用户做这项授权，就改为分发构建产物——以下两种形式都不需要任何构建权限：
+如果不想让用户做这项授权，就将构建产物放进 tarball 分发；这种方式不需要构建权限：
 
-- **发布到 npm**，在 `pnpm publish` 时构建好 `lib/`；`dsh plugin add your-package` 安装的就是预构建代码。
 - **交付 tarball**：用 `pnpm pack` 打包；用户执行 `dsh plugin add ./hello-plugin-0.1.0.tgz`。
 
 ## 下一步

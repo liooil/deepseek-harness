@@ -2,29 +2,30 @@
 
 English | [中文](python-sdk.zh.md)
 
-This tutorial is the programmatic alternative to the Web UI. It installs the published Python SDK, runs a checked-in agent composition, and shows how to call the same API from your own program.
+This guide is for repository contributors who need to exercise the Python SDK locally. This fork does not publish the SDK to PyPI; end users should download the desktop binary from the [GitHub Releases](https://github.com/liooil/deepseek-harness/releases) page.
 
 ## Prerequisites
 
 - Python 3.10 or newer
 - Git
+- Node.js `^22.19.0` or `>=24.0.0`, pnpm, and uv
 - Linux x64, Linux arm64, or macOS 14 or newer on arm64
 - A DeepSeek-compatible API endpoint and credential
 - An isolated workspace that the agent may modify
 
-## Install the SDK
+## Build the local SDK environment
 
-Clone the repository for its runnable example, create a virtual environment, and install the SDK with its same-version bundled runtime:
+Clone the repository, build the host runtime carrier, and create the editable SDK environment:
 
 ```sh
-git clone https://github.com/deepseek-ai/deepseek-harness.git
+git clone https://github.com/liooil/deepseek-harness.git
 cd deepseek-harness
-python -m venv .venv
-. .venv/bin/activate
-python -m pip install deepseek-harness-sdk
+pnpm install
+pnpm exec tsx scripts/build-exe-for-python-sdk.ts
+uv sync --project python/sdk
 ```
 
-The installed runtime needs no system Node.js. Repository contributors who need to build the runtime or wheels from source should use the [Python contributor workflows](../../../python/development.md).
+The build creates a local executable carrier; `uv` installs the SDK and runtime packages in editable mode. Repository contributors who need other targets or local wheel artifacts should use the [Python contributor workflows](../../../python/development.md).
 
 ## Run the checked-in example
 
@@ -40,7 +41,7 @@ export DEEPSEEK_API_KEY=sk-your-key-here
 Run one task against an isolated workspace and session directory:
 
 ```sh
-python examples/jsonrpc-agent/minimal.py \
+uv run --project python/sdk python examples/jsonrpc-agent/minimal.py \
   --workspace /absolute/path/to/workspace \
   --session-root /absolute/path/to/sessions \
   --session-id example-001 \

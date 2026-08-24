@@ -1,6 +1,6 @@
 # Agent Note: Artifact-first NPM baseline publication
 
-Status: proposed
+Status: rejected — npm package publication was replaced by the desktop-binary-only release decision
 
 English | [中文](2026-08-04-artifact-first-npm-baseline-publication.zh.md)
 

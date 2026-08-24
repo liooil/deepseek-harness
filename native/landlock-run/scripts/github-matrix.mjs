@@ -1,11 +1,10 @@
 #!/usr/bin/env node
 /**
- * Derive the GitHub Actions matrices from the checked-in package matrix
- * (`packages/<name>/prebuilds.json`). Single source: adding a platform
- * package extends CI and Release without editing a workflow.
+ * Derive the GitHub Actions CI matrix from the checked-in package matrix
+ * (`packages/<name>/prebuilds.json`). Adding a platform extends CI without
+ * editing the workflow.
  *
- *   node scripts/github-matrix.mjs ci                → one leg per distinct platform
- *   node scripts/github-matrix.mjs release-prebuild  → one leg per platform package
+ *   node scripts/github-matrix.mjs ci  -> one leg per distinct platform
  */
 
 import path from 'node:path';
@@ -26,41 +25,20 @@ function runnerFor(platform) {
 }
 
 function platformManifests() {
-  return platformDirs().map((dir) => ({
-    dir,
-    name: path.basename(dir),
-    prebuilds: readJson(path.join(root, dir, 'prebuilds.json')),
-  }));
+  return platformDirs().map((dir) => readJson(path.join(root, dir, 'prebuilds.json')));
 }
 
 function ciMatrix() {
-  const platforms = [...new Set(platformManifests().map(({ prebuilds }) => prebuilds.platform))].sort();
+  const platforms = [...new Set(platformManifests().map(({ platform }) => platform))].sort();
   return {
     include: platforms.map((platform) => ({ platform, runner: runnerFor(platform) })),
   };
 }
 
-function releasePrebuildMatrix() {
-  return {
-    include: platformManifests().map(({ dir, name, prebuilds }) => ({
-      platform: prebuilds.platform,
-      package: name,
-      dir,
-      runner: runnerFor(prebuilds.platform),
-      artifact: `prebuild-${name}`,
-    })),
-  };
-}
-
 const target = process.argv[2];
-const matrices = {
-  ci: ciMatrix,
-  'release-prebuild': releasePrebuildMatrix,
-};
-
-if (!target || !matrices[target]) {
-  console.error(`Usage: node scripts/github-matrix.mjs <${Object.keys(matrices).join('|')}>`);
+if (target !== 'ci') {
+  console.error('Usage: node scripts/github-matrix.mjs ci');
   process.exit(1);
 }
 
-process.stdout.write(JSON.stringify(matrices[target]()));
+process.stdout.write(JSON.stringify(ciMatrix()));

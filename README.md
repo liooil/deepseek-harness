@@ -12,22 +12,23 @@ DeepSeek Harness is currently in _developer preview_ and is iterating rapidly. *
 
 ## Run
 
-### Run from `npm`
+### Run the desktop binary
 
-Install `Node.js`, then run:
+Download the matching `dsh-desktop-{linux,windows,macos}-{x64,arm64}` executable from [GitHub Releases](https://github.com/liooil/deepseek-harness/releases). Release executables include the server and Web UI and do not require Node.js, Bun, or npm.
 
 ```sh
-npx @deepseek-ai/dsh web
+chmod +x ./dsh-desktop-linux-x64
+./dsh-desktop-linux-x64
 ```
 
-The command starts the Web UI at `http://127.0.0.1:3080` by default and opens it in the default browser for a local launch. An SSH launch only prints the host URL because the SSH client or editor owns the local forwarded address. Pass `--no-open` to run the server without opening a browser. See [Web UI guide](docs/user/guide/index.md).
+On Windows, run the `.exe` asset directly. Linux webview mode requires WebKit2GTK 4.1; Windows webview mode requires WebView2. Use `--browser` to open a dedicated browser window, or `--smoke --cwd <directory>` to validate a release without opening a window. See the [desktop launcher guide](apps/desktop/README.md).
 
 ### Run from source
 
 To run from a repository checkout:
 
 ```sh
-git clone https://github.com/deepseek-ai/deepseek-harness.git
+git clone https://github.com/liooil/deepseek-harness.git
 cd deepseek-harness
 pnpm install
 pnpm run build
@@ -42,8 +43,7 @@ The desktop launcher requires both `Node.js` and [Bun](https://bun.sh). Build th
 pnpm desktop
 ```
 
-Windows and Linux use the system webview by default; macOS uses a dedicated browser window. Select either mode explicitly with `pnpm desktop --webview` or `pnpm desktop --browser`. See the [desktop launcher guide](apps/desktop/README.md) for requirements and options.
-`pnpm run build` prepares the repository artifacts. `pnpm dsh web` uses those built artifacts without rebuilding.
+Windows and Linux use the system webview by default; macOS uses a dedicated browser window. Select either mode explicitly with `pnpm desktop --webview` or `pnpm desktop --browser`. See the [desktop launcher guide](apps/desktop/README.md) for requirements and options. `pnpm run build` prepares the repository artifacts. `pnpm dsh web` uses those built artifacts without rebuilding.
 
 ## Community and support
 

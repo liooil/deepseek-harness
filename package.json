@@ -1,8 +1,8 @@
 {
   "name": "@deepseek-ai/dsh-root",
   "version": "0.1.1-rc.2",
-  "license": "MIT",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "packageManager": "pnpm@11.7.0",
   "engines": {
@@ -131,13 +131,6 @@
     "constraints": "tsx scripts/check-workspace-constraints.ts",
     "doc-sync": "tsx scripts/run-gates.ts doc-sync",
     "hygiene": "tsx scripts/run-gates.ts hygiene",
-    "publish:npm-baseline": "tsx scripts/publish-npm-baseline.ts",
-    "release:dsh": "tsx scripts/release/bump.ts --family dsh",
-    "release:vendor": "tsx scripts/release/bump.ts --family vendor",
-    "release:verify": "tsx scripts/release/verify.ts",
-    "release:pack": "tsx scripts/release/pack.ts",
-    "release:verify-packed-install": "tsx scripts/release/verify-packed-install.ts",
-    "release:publish": "tsx scripts/release/publish.ts",
     "build:desktop-exe": "bun scripts/build-desktop-executable.ts",
     "dsh": "node --import tsx/esm apps/cli/src/bin.ts",
     "desktop": "bun apps/desktop/src/bin.ts",

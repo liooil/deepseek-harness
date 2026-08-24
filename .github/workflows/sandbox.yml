@@ -4,7 +4,7 @@
 # A separate workflow from ci.yml because the axis is different — these jobs
 # fan out over OS×runner (kernel capabilities), not node versions. The Landlock
 # launcher is built from native/landlock-run on each Landlock leg and installed
-# from the same tarballs the main-repository release workflow publishes.
+# from locally packed workspace artifacts; no registry publication is involved.
 name: Sandbox
 
 on:
@@ -112,10 +112,10 @@ jobs:
           # the very platform that exists to prove it) is a failure, not a pass.
           echo "$out" | grep -qE 'Test Files[[:space:]]+2 passed \(2\)'
 
-      # Publish-path rehearsal, Landlock legs only. Build the launcher on its
-      # native architecture, then install the local native and harness tarballs
-      # together so registry state cannot mask source/package drift.
-      - name: Build packages for the pack rehearsal
+      # Packed-install validation, Landlock legs only. Build the launcher on
+      # its native architecture, then install the local native and harness
+      # tarballs together so registry state cannot mask source/package drift.
+      - name: Build artifacts for packed-install validation
         if: matrix.runner == 'landlock'
         run: pnpm run build:official
 

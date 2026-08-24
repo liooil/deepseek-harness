@@ -2,7 +2,7 @@
 
 [English](development.md) | 中文
 
-根据所需的贡献者成果选择工作流：构建运行时产物、验证 SDK、从源码运行或构建分发包。包行为分别见 [SDK 参考](sdk/README.zh.md) 和[运行时载体参考](sdk-runtime/README.zh.md)。
+根据所需的贡献者成果选择工作流：构建运行时产物、验证 SDK、从源码运行或构建本地 wheel 产物。包行为分别见 [SDK 参考](sdk/README.zh.md) 和[运行时载体参考](sdk-runtime/README.zh.md)。
 
 ## 构建运行时产物
 
@@ -54,9 +54,9 @@ with DeepSeekHarness() as harness:
 
 完整的源码模式调用见 `python/sdk/tests/manual_sdk_agent_smoke.py`。
 
-## 构建分发包
+## 构建本地 wheel 产物
 
-根目录 `package.json` 的版本是两个 Python 分发包的权威版本。暂存脚本会将该版本注入两个 wheel 包，并将 SDK 固定到同版本的 `deepseek-harness-runtime-bin`。
+根目录 `package.json` 的版本是两个本地 Python wheel 产物的权威版本。暂存脚本会将该版本注入两个 wheel 包，并将 SDK 固定到同版本的 `deepseek-harness-runtime-bin`。此 fork 不会将这两个 Python 分发包发布到 PyPI；最终用户应使用 [GitHub Releases](https://github.com/liooil/deepseek-harness/releases) 页面上的桌面二进制。
 
 纯 SDK wheel 包只需构建一次；每个原生平台分别构建一个运行时 wheel 包：
 
@@ -75,12 +75,8 @@ pip install \
   "dist-python/deepseek_harness_runtime_bin-$version-py3-none-macosx_14_0_arm64.whl"
 ```
 
-运行时分发包仅提供 wheel 包。发布流水线会连同纯 SDK wheel 包一起发布三个平台 wheel 包：Linux x64、Linux arm64 和 macOS 14 或更高版本的 arm64。只有与仓库版本匹配时，才接受 `python-v<repository-version>` 标签；`0.0.1-rc.1` 之类的仓库预发布版本在 wheel 包文件名和元数据中使用规范化的 PEP 440 写法，例如 `0.0.1rc1`。
+运行时产物仅提供 wheel 包。本地验证工作流会连同纯 SDK wheel 包一起构建三个平台 wheel 包：Linux x64、Linux arm64 和 macOS 14 或更高版本的 arm64。`0.0.1-rc.1` 之类的仓库预发布版本会在本地 wheel 包文件名和元数据中使用规范化的 PEP 440 写法，例如 `0.0.1rc1`。
 
-## 验证候选发行版
+## 验证本地 wheel 产物
 
-为拉取请求添加 `python-release-dry-run` 标签，或手动运行 GitHub 的 `Release (Python)` 工作流并设置 `publish=false`，即可构建全部四个 wheel 包，在 Python 3.10 和 3.14 上安装 Linux 发行集合，检查精确文件名和元数据，执行 PyPI 默认单文件大小限制，并保留一份带 SHA-256 哈希的汇总产物。两条路径都没有注册表凭据，拉取请求运行无法进入任何发布作业。
-
-公开发布从私有自动化仓库运行；包元数据指向独立的只读公开源码镜像，该镜像不运行发布 Actions。私有仓库把仓库变量 `PYPI_PUBLISHER_REPOSITORY` 定义为自身的 `owner/name`，并且只在有意发布期间把 `PUBLIC_PYPI_RELEASE_ENABLED` 从 `false` 改为 `true`。
-
-独立的运行时与 SDK 作业使 SDK 上传失败后可以继续执行，而无需重新发送不可变的运行时文件。只有工作流从配置的发布仓库、匹配的 `python-v*` 标签运行，且受保护的 `pypi-runtime` 和 `pypi` 环境分别批准运行时与 SDK 作业时，才接受 `publish=true`。PyPI Trusted Publishing 仍会提供短期 OIDC 凭据，但公开 attestation 会披露私有发布仓库身份，因此将其禁用。
+`Build single-exe` 工作流及其 CI 调用方会构建全部四个 wheel 包或选定的平台子集，在 Python 3.10 和 3.14 上安装 Linux 集合，检查精确文件名和元数据，验证原生部署约束，并将检查过的 wheel 包保留为工作流产物。这些任务没有注册表凭据，也没有发布 job；添加 `build-exe` 标签或手动运行 workflow dispatch 即可开始验证。

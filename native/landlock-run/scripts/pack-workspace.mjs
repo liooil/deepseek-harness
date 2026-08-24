@@ -1,15 +1,14 @@
 #!/usr/bin/env node
 /**
- * Pack every published package into release tarballs, in publish order
- * (platform packages first, then the entries that optionally depend on
- * them), and write `publish-order.txt` next to them. `pnpm pack` produces
- * the EXACT bytes `pnpm publish` would upload and runs each package's
- * `prepack` gate, so a missing binary or unbuilt `lib/` refuses here.
+ * Pack every workspace package into validation tarballs, in dependency order
+ * (platform packages first, then the entries that optionally depend on them),
+ * and write `package-order.txt` next to them. The pack commands produce the
+ * install payload and run each package's `prepack` check, so a missing binary
+ * or unbuilt `lib/` refuses here.
  *
- * Usage: `node scripts/pack-release.mjs [dest] [--current-platform-only]`.
- * The flag packs only THIS host's platform package plus the entries — for
- * per-architecture CI legs, where the other architecture's binary does not
- * exist (the exact refusal its prepack gate exists for).
+ * Usage: `node scripts/pack-workspace.mjs [dest] [--current-platform-only]`.
+ * The flag packs only this host's platform package plus the entries for
+ * per-architecture CI legs, where the other architecture's binary is absent.
  */
 
 import fs from 'node:fs';
@@ -49,15 +48,12 @@ fs.mkdirSync(destination, { recursive: true });
 
 const dirs = [...(currentPlatformOnly ? hostPlatformDirs() : platformDirs()), ...entryDirs()];
 const platformSet = new Set(platformDirs());
-const publishOrder = [];
+const packageOrder = [];
 for (const dir of dirs) {
   const manifest = readJson(path.join(root, dir, 'package.json'));
-  // Platform packages are packed with npm: pnpm pack (observed on 11.7.0)
-  // normalizes file modes and STRIPS the executable bit, which ships a
-  // launcher no consumer can spawn; npm pack preserves it. Platform packages
-  // have no dependencies by construction, so they need none of pnpm's
-  // workspace-protocol conversion — the entry packages do, and carry no
-  // executables, so they keep pnpm pack.
+  // pnpm pack normalizes modes and strips the platform launcher's executable
+  // bit. Platform packages have no workspace dependencies, so npm pack can
+  // preserve the mode while entry packages use pnpm's workspace conversion.
   if (platformSet.has(dir)) {
     run('npm', ['pack', `./${dir}`, '--pack-destination', destination]);
   } else {
@@ -69,8 +65,8 @@ for (const dir of dirs) {
   if (!fs.existsSync(tarballPath)) {
     throw new Error(`expected pack output not found: ${tarballPath}`);
   }
-  publishOrder.push(tarball);
+  packageOrder.push(tarball);
 }
 
-fs.writeFileSync(path.join(destination, 'publish-order.txt'), `${publishOrder.join('\n')}\n`);
-console.log(`Packed ${publishOrder.length} packages into ${path.relative(root, destination)}`);
+fs.writeFileSync(path.join(destination, 'package-order.txt'), `${packageOrder.join('\n')}\n`);
+console.log(`Packed ${packageOrder.length} packages into ${path.relative(root, destination)}`);

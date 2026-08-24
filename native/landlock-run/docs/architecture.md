@@ -23,11 +23,11 @@ The probe is functional — the launcher builds and enforces a real maximal rule
 
 The launcher exits `125` without exec'ing the command on any launcher-level failure: usage error, unenforcing kernel, unopenable grant root, failed exec. Partial enforcement (an older Landlock ABI governing only a subset of accesses) is accepted, reported on stderr, and surfaced by the probe as `partial` — the consumer decides what its mode vocabulary promises at each level. Neither the binary nor the entry package reads environment variables: which binary confines a process is never decidable by the ambient environment.
 
-## Build and release model
+## Build and validation model
 
-Builds are native-only. `scripts/build.ts` compiles the running architecture's binaries with the distro `musl-gcc` (static: no loader or libc expectations on consumers, one binary for glibc and musl distros); CI's per-architecture runners are the builders of record, and no cross toolchain exists in the repo. Review covers the C source and the CI job that built each binary, enforced by three gates: platform prepack refuses missing/wrong-ELF binaries, entry prepack refuses unbuilt `lib/`, and the release pipeline byte-pins installed binaries against the workspace builds they were packed from.
+Builds are native-only. `scripts/build.ts` compiles the running architecture's binaries with the distro `musl-gcc` (static: no loader or libc expectations on consumers, one binary for glibc and musl distros); CI validates each architecture on its native runner, and no cross toolchain exists in the repo. Platform `prepack` refuses missing or wrong-ELF binaries, entry `prepack` refuses unbuilt `lib/`, and the packed-install rehearsal byte-pins installed binaries against the workspace builds they were packed from.
 
-The package matrix is checked-in metadata (`prebuilds.json` + `os`/`cpu` fields); `scripts/github-matrix.mjs` derives the CI and Release matrices from it, so adding a platform extends automation without editing workflows.
+The package matrix is checked-in metadata (`prebuilds.json` + `os`/`cpu` fields); `scripts/github-matrix.mjs` derives the CI matrix from it, so adding a platform extends validation without editing the workflow.
 
 ## Adding a platform
 

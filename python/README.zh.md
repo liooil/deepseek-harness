@@ -1,4 +1,4 @@
-# DeepSeek Harness Python SDK
+# DeepSeek Harness Python SDK（内部）
 
 [English](README.md) | 中文
 
@@ -17,4 +17,4 @@
 
 ## 贡献者工作流
 
-[Python 贡献者工作流](development.zh.md)介绍运行时产物构建、包验证、源码模式开发和分发。
+此 fork 不会将这些包发布到 PyPI。[Python 贡献者工作流](development.zh.md)介绍运行时产物构建、包验证、源码模式开发和本地 wheel 产物。最终用户应使用 [GitHub Releases](https://github.com/liooil/deepseek-harness/releases) 页面上的桌面二进制。

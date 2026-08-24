@@ -2,29 +2,30 @@
 
 [English](python-sdk.md) | 中文
 
-本教程介绍 Web UI 之外的程序化使用方式：安装已发布的 Python SDK、运行仓库内置的 agent（智能体）组合，并在自己的程序中调用同一套 API。
+本指南面向需要在本地验证 Python SDK 的仓库贡献者。此 fork 不会将 SDK 发布到 PyPI；最终用户应从 [GitHub Releases](https://github.com/liooil/deepseek-harness/releases) 页面下载桌面二进制。
 
 ## 前置要求
 
 - Python 3.10 或更高版本
 - Git
+- Node.js `^22.19.0` 或 `>=24.0.0`、pnpm 与 uv
 - Linux x64、Linux arm64 或 macOS 14 或更高版本的 arm64
 - DeepSeek 兼容的 API 端点与凭据
 - agent 可以修改的隔离 workspace
 
-## 安装 SDK
+## 构建本地 SDK 环境
 
-克隆仓库以使用其中的可运行示例，创建虚拟环境，并安装 SDK 及其同版本内置运行时：
+克隆仓库，构建本机运行时载体，并创建可编辑的 SDK 环境：
 
 ```sh
-git clone https://github.com/deepseek-ai/deepseek-harness.git
+git clone https://github.com/liooil/deepseek-harness.git
 cd deepseek-harness
-python -m venv .venv
-. .venv/bin/activate
-python -m pip install deepseek-harness-sdk
+pnpm install
+pnpm exec tsx scripts/build-exe-for-python-sdk.ts
+uv sync --project python/sdk
 ```
 
-安装后的运行时不需要系统提供 Node.js。需要从源码构建运行时或 wheel 包的仓库贡献者应使用 [Python 贡献者工作流](../../../python/development.zh.md)。
+构建会创建本地可执行载体；`uv` 会以可编辑模式安装 SDK 与运行时包。需要构建其他目标或本地 wheel 产物的仓库贡献者应使用 [Python 贡献者工作流](../../../python/development.zh.md)。
 
 ## 运行仓库内置示例
 
@@ -40,7 +41,7 @@ export DEEPSEEK_API_KEY=sk-your-key-here
 针对隔离的 workspace 和会话目录运行一个任务：
 
 ```sh
-python examples/jsonrpc-agent/minimal.py \
+uv run --project python/sdk python examples/jsonrpc-agent/minimal.py \
   --workspace /absolute/path/to/workspace \
   --session-root /absolute/path/to/sessions \
   --session-id example-001 \

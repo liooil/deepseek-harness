@@ -32,28 +32,14 @@ const vendoredPackages = new Set([
   '@deepseek-ai/cordis-plugin-hmr',
   '@deepseek-ai/cordis-plugin-logger-console',
 ])
-const publicLandlockPackages = new Set([
-  '@deepseek-ai/node-addon-landlock-run',
-  '@deepseek-ai/node-addon-landlock-run-linux-arm64',
-  '@deepseek-ai/node-addon-landlock-run-linux-x64',
-])
 /** Deliberate source payloads whose exact bytes are part of the package's audit surface. */
 const publicationSourceAllowlist: Readonly<Record<string, readonly string[]>> = {
   '@deepseek-ai/node-addon-landlock-run': ['src/main.c'],
 }
-const repositoryUrl = 'git+https://github.com/deepseek-harness/deepseek-harness.git'
-/**
- * Source home the published packages point consumers at. It differs from
- * {@link repositoryUrl}, which the Landlock packages keep because npm resolves
- * their trusted publishing against the repository that runs the workflow.
- */
-const publishedRepositoryUrl = 'git+https://github.com/deepseek-ai/deepseek-harness.git'
 /** Private packages that participate in workspace checks but not releases. */
 const experimentalPackageDirectory = /^packages\/experimental\/[^/]+$/
 /** npm namespace reserved for private experimental packages. */
 const experimentalPackageNamePrefix = '@deepseek-ai/dsh-experimental-'
-/** Directories whose packages this repository publishes: one release member each. */
-const releaseMemberDirectory = /^(?:packages\/(?!experimental\/)[^/]+\/[^/]+|apps\/[^/]+|vendor\/[^/]+)$/
 
 const localArtifactDirs = new Set(['node_modules'])
 const appPackageFiles: Readonly<Record<string, readonly string[]>> = {
@@ -162,7 +148,7 @@ const packageFileExtras: Readonly<Record<string, readonly string[]>> = {
   // SQLite loads every statement from immutable package resources at runtime.
   '@deepseek-ai/dsh-session-persistence-sqlite': ['resources/sql/**/*.sql'],
   '@deepseek-ai/dsh-skill-badge': ['assets'],
-  '@deepseek-ai/dsh-subprocess-local': ['scripts/ensure-spawn-helper.mjs'],
+  '@deepseek-ai/dsh-subprocess-local': ['lib/windows-inspector-*.js', 'scripts/ensure-spawn-helper.mjs'],
 }
 
 function sameStringList(actual: readonly string[] | undefined, expected: readonly string[]): boolean {
@@ -259,47 +245,11 @@ function checkWorkspace({ dir, manifest }: WorkspaceManifest): string[] {
   const errors = checkExperimentalManifest({ dir, manifest })
   const label = manifest.name ?? dir
   const isLandlockPackageDir = dir.startsWith('native/landlock-run/packages/')
-  const isPublicLandlockPackage = isLandlockPackageDir
-    && manifest.name !== undefined
-    && publicLandlockPackages.has(manifest.name)
-
-  if (isPublicLandlockPackage) {
-    if (manifest.private === true) {
-      errors.push(`${label}: published Landlock package must not set "private": true`)
-    }
-    if (manifest.publishConfig?.access !== 'public') {
-      errors.push(`${label}: published Landlock package must set publishConfig.access to "public"`)
-    }
-    const expectedDirectory = dir
-    if (manifest.repository?.type !== 'git'
-      || manifest.repository.url !== repositoryUrl
-      || manifest.repository.directory !== expectedDirectory) {
-      errors.push(`${label}: published Landlock package repository must use ${repositoryUrl} with directory ${expectedDirectory} for trusted publishing`)
-    }
-  } else if (releaseMemberDirectory.test(dir)) {
-    // Release members state that they are publishable: npm refuses a private
-    // package, and the repository field is how a consumer finds the source of
-    // the package it installed.
-    //
-    // Access is per release sequence, not per scope: the vendored framework and
-    // the Landlock packages publish publicly because outside consumers install
-    // them, while the dsh family stays restricted until its own sequence goes
-    // public. A mixed scope is why no publish path passes `--access` — one flag
-    // cannot serve both, so each packed manifest decides
-    // ([rationale](../.agents/notes/implemented/process/2026-08-13-public-vendor-and-native-sequences.md)).
-    if (manifest.private === true) {
-      errors.push(`${label}: release member must not set "private": true`)
-    }
-    if (manifest.publishConfig?.access !== 'public') {
-      errors.push(`${label}: release member must set publishConfig.access to "public"`)
-    }
-    if (manifest.repository?.type !== 'git'
-      || manifest.repository.url !== publishedRepositoryUrl
-      || manifest.repository.directory !== dir) {
-      errors.push(`${label}: release member repository must use ${publishedRepositoryUrl} with directory ${dir}`)
-    }
-  } else if (!experimentalPackageDirectory.test(dir) && manifest.private !== true) {
+  if (!experimentalPackageDirectory.test(dir) && manifest.private !== true) {
     errors.push(`${label}: package.json must set "private": true`)
+  }
+  if (!experimentalPackageDirectory.test(dir) && manifest.publishConfig !== undefined) {
+    errors.push(`${label}: package.json must omit "publishConfig"; workspace packages are not published`)
   }
 
   if (manifest.name && vendoredPackages.has(manifest.name)) {
@@ -325,9 +275,6 @@ function checkWorkspace({ dir, manifest }: WorkspaceManifest): string[] {
   }
 
   if (isLandlockPackageDir) {
-    if (!isPublicLandlockPackage) {
-      errors.push(`${label}: unexpected package in the public Landlock package family`)
-    }
     if (manifest.version !== landlockVersion) {
       errors.push(`${label}: package.json version must match Landlock workspace version ${landlockVersion ?? '(missing)'}`)
     }
@@ -409,8 +356,8 @@ function checkHierarchyShape(): string[] {
 }
 
 function checkRepositoryVersion(): string[] {
-  // The root carries the dsh release family's version, so a prerelease such as
-  // 0.0.1-rc.1 is a valid state between `release:dsh` and its publication.
+  // The root version is shared by the workspace packages and desktop build,
+  // so prerelease versions remain valid source/build states.
   if (repositoryVersion && /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(repositoryVersion)) return []
   return ['package.json: version must be X.Y.Z with an optional prerelease segment']
 }
@@ -421,8 +368,8 @@ const dependencySections = ['dependencies', 'devDependencies', 'peerDependencies
 const runtimeDependencySections = ['dependencies', 'optionalDependencies', 'peerDependencies'] as const
 
 /**
- * Prevent an official runtime from requiring a package its release omits.
- * @param manifests - release, private experimental, and deployment-root manifests.
+ * Prevent a non-experimental runtime from requiring an experimental package.
+ * @param manifests - workspace and deployment-root manifests.
  * @returns One error for each forbidden runtime dependency.
  */
 export function checkExperimentalDependencyIsolation(manifests: readonly WorkspaceManifest[]): string[] {
@@ -432,7 +379,7 @@ export function checkExperimentalDependencyIsolation(manifests: readonly Workspa
     .filter(name => name !== undefined))
   const errors: string[] = []
   for (const { dir, manifest } of manifests) {
-    if (!releaseMemberDirectory.test(dir) && dir !== 'python/sdk-runtime') continue
+    if (experimentalPackageDirectory.test(dir)) continue
     for (const section of runtimeDependencySections) {
       for (const name of Object.keys(manifest[section] ?? {})) {
         if (!experimentalNames.has(name)) continue

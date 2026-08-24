@@ -23,7 +23,7 @@ PLATFORM_MANIFEST = ROOT / "python" / "sdk-runtime" / "platforms.json"
 
 
 def load_platforms(path: Path = PLATFORM_MANIFEST) -> dict[str, tuple[str, str]]:
-    """Load the release platform tag and executable pairs from the build manifest."""
+    """Load wheel platform tags and executable names from the build manifest."""
     try:
         payload = json.loads(path.read_text())
     except (OSError, json.JSONDecodeError) as error:
@@ -55,17 +55,11 @@ def runtime_suffixes(executable_name: str) -> tuple[str, ...]:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--package", choices=("sdk", "runtime"), required=True)
-    parser.add_argument(
-        "--tag",
-        help="optional python-v<repository-version> release tag; it must match package.json",
-    )
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--platform", choices=tuple(PLATFORMS))
     parser.add_argument("--runtime-exe", type=Path)
     args = parser.parse_args()
     version = repository_version()
-    validate_release_tag(args.tag, version)
-    # Wheels carry the PEP 440 spelling; the tag keeps the repository spelling.
     wheel_version = pep440_version(version)
     if args.package == "runtime" and (args.platform is None or args.runtime_exe is None):
         parser.error("runtime builds require --platform and --runtime-exe")
@@ -74,7 +68,7 @@ def main() -> None:
 
     output_dir = args.output_dir.resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix="dsh-python-release-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="dsh-python-wheel-") as temporary:
         staging = Path(temporary) / args.package
         if args.package == "sdk":
             stage_sdk(staging, wheel_version)
@@ -127,16 +121,6 @@ def pep440_version(version: str) -> str:
         match.group(1), match.group(1)
     )
     return f"{stable}{identifier}{match.group(2)}"
-
-
-def validate_release_tag(tag: str | None, version: str) -> None:
-    if tag is None:
-        return
-    expected = f"python-v{version}"
-    if tag != expected:
-        raise ValueError(
-            f"release tag must match repository version: expected {expected!r}, got {tag!r}"
-        )
 
 
 def copy_package(source: Path, destination: Path) -> None:

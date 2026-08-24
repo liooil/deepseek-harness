@@ -42,7 +42,7 @@ async function runSmoke(web: Awaited<ReturnType<typeof startDshWeb>>): Promise<v
     throw new Error(`desktop smoke request expected text/html, received ${JSON.stringify(contentType)}`)
   }
   const html = await response.text()
-  if (!html.includes('window.__DSH_BOOT__')) throw new Error('desktop smoke: UI boot manifest is missing')
+  if (!html.includes('globalThis["__DSH_BOOT__"]')) throw new Error('desktop smoke: UI boot manifest is missing')
   const paths = new Set<string>()
   for (const match of html.matchAll(/"url":"([^"#]+)"/g)) {
     const path = match[1]

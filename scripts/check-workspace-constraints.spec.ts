@@ -1,4 +1,4 @@
-/** Experimental-package publication and dependency constraints. */
+/** Experimental-package privacy and dependency constraints. */
 
 import { describe, expect, it } from 'vitest'
 import {
@@ -34,7 +34,7 @@ describe('experimental workspace constraints', () => {
   })
 
   it.each(['dependencies', 'optionalDependencies', 'peerDependencies'] as const)(
-    'rejects release %s on an experimental package',
+    'rejects runtime %s on an experimental package',
     (section) => {
       expect(checkExperimentalDependencyIsolation([experimental, {
         dir: 'packages/core/consumer',
@@ -48,7 +48,7 @@ describe('experimental workspace constraints', () => {
     },
   )
 
-  it('allows development and experimental consumers but rejects the Python release runtime', () => {
+  it('allows development and experimental consumers but rejects the Python deployment root', () => {
     const manifests: WorkspaceManifest[] = [experimental, {
       dir: 'packages/core/test-only',
       manifest: {

@@ -1,8 +1,8 @@
 # Naming
 
-## npm packages
+## Internal packages
 
-The public package family belongs to the `@deepseek-ai` scope and uses the `node-addon-landlock-run` package prefix; platform packages append platform information only:
+The internal package family belongs to the `@deepseek-ai` scope and uses the `node-addon-landlock-run` package prefix; platform packages append platform information only:
 
 ```text
 @deepseek-ai/node-addon-landlock-run

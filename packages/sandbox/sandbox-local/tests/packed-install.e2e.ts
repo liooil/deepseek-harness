@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 /**
- * Keyless publish-path rehearsal. It packs the provider, its workspace peers, the vendored framework
+ * Keyless packed-workspace rehearsal. It packs the provider, its workspace peers, the vendored framework
  * peer, and the current repository's Landlock entry/platform packages, then installs those exact
  * tarballs in an external plain-Node consumer. The host launcher comes from the exact local tarballs,
  * so no registry copy, tsx, path mapping, or workspace resolution can hide missing files, dependency
@@ -25,7 +25,7 @@ const nativeDir = join(repoRoot, 'native/landlock-run')
 const sourceLauncher = join(nativeDir, 'packages', `linux-${process.arch}`, 'bin', 'landlock-run')
 const platformPackageName = `@deepseek-ai/node-addon-landlock-run-linux-${process.arch}`
 
-/** The harness closure the consumer needs; native tarballs are packed through their mode-preserving release script. */
+/** The harness closure the consumer needs; native tarballs are packed through their mode-preserving pack script. */
 const WORKSPACE_CLOSURE = [
   'packages/sandbox/sandbox-local',
   // sandbox-local's win32 chain rung is a runtime dependency: a packed
@@ -73,26 +73,26 @@ let verdict: {
   confineOutcome?: string
 } = { launcher: '', launcherExists: false, enforcing: false }
 
-describe.skipIf(!packable)('sandbox-local: packed-tarball distribution (publish-path rehearsal)', () => {
+describe.skipIf(!packable)('sandbox-local: packed-tarball distribution (internal rehearsal)', () => {
   beforeAll(async () => {
     const packDest = mkdtempSync(join(tmpdir(), 'dsh-pack-'))
     consumerDir = mkdtempSync(join(tmpdir(), 'dsh-packed-consumer-'))
     workDir = mkdtempSync(join(tmpdir(), 'dsh-packed-work-'))
 
     const nativePackDest = join(packDest, 'native')
-    const nativePack = spawnSync('node', ['./scripts/pack-release.mjs', nativePackDest, '--current-platform-only'], {
+    const nativePack = spawnSync('node', ['./scripts/pack-workspace.mjs', nativePackDest, '--current-platform-only'], {
       cwd: nativeDir,
       encoding: 'utf8',
       timeout: 120_000,
     })
     expect(nativePack.status, `native pack failed:\n${nativePack.stdout}\n${nativePack.stderr}`).toBe(0)
 
-    const nativeTarballs = readFileSync(join(nativePackDest, 'publish-order.txt'), 'utf8')
+    const nativeTarballs = readFileSync(join(nativePackDest, 'package-order.txt'), 'utf8')
       .trim()
       .split('\n')
       .map(tarball => join(nativePackDest, tarball))
 
-    // Pack each harness closure member with the exact bytes publish would upload.
+    // Pack each harness closure member with the exact bytes used by this test.
     const tarballs: string[] = []
     for (const pkg of WORKSPACE_CLOSURE) {
       const pack = spawnSync('pnpm', ['pack', '--pack-destination', packDest], {

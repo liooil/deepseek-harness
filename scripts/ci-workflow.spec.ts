@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import * as yaml from 'js-yaml'
 import { describe, expect, it } from 'vitest'
@@ -207,7 +207,7 @@ describe('CI workflow', () => {
     expect(config).not.toContain('packages/lsp/lsp-stdio/src/instance.ts')
   })
 
-  it('requires one release-shaped Python runtime target on every pull request', () => {
+  it('requires one packaged Python runtime target on every pull request', () => {
     const workflow = loadWorkflow('.github/workflows/ci.yml')
     const pythonRuntime = workflowJob(workflow, 'python-runtime')
     const aggregate = workflowJob(workflow, 'all-checks-passed')
@@ -217,7 +217,7 @@ describe('CI workflow', () => {
 
     expect(pythonRuntime).toMatchObject({
       if: "github.event_name == 'pull_request'",
-      name: 'python runtime / release-shaped Linux x64',
+      name: 'python runtime / packaged Linux x64',
       uses: './.github/workflows/build-exe-for-python-sdk.yml',
       with: {
         targets: 'node24-linux-x64',
@@ -276,89 +276,8 @@ describe('E2B e2e workflow', () => {
   })
 })
 
-describe('Python release workflows', () => {
-  it('keeps complete wheel validation separate from protected public publication', () => {
-    const workflow = loadWorkflow('.github/workflows/python-release.yml')
-    const dispatch = workflowEvent(workflow, 'workflow_dispatch')
-    const pullRequest = workflowEvent(workflow, 'pull_request')
-    const build = workflowJob(workflow, 'build')
-    const pythonCompat = workflowJob(workflow, 'python-compat')
-    const validate = workflowJob(workflow, 'validate')
-    const publishRuntime = workflowJob(workflow, 'publish-runtime')
-    const publishSdk = workflowJob(workflow, 'publish-sdk')
-    if (!isRecord(dispatch.inputs)
-      || !isRecord(dispatch.inputs.publish)
-      || !Array.isArray(pythonCompat.steps)
-      || !Array.isArray(validate.steps)
-      || !Array.isArray(publishRuntime.steps)
-      || !Array.isArray(publishSdk.steps)) {
-      throw new TypeError('Python release workflow must define publish input and release steps')
-    }
-
-    expect(dispatch.inputs.publish).toMatchObject({ type: 'boolean', default: false })
-    expect(pullRequest).toEqual({ types: ['labeled'] })
-    expect(build).toMatchObject({
-      if: "github.event_name == 'workflow_dispatch' || github.event.label.name == 'python-release-dry-run'",
-      uses: './.github/workflows/build-exe-for-python-sdk.yml',
-      with: {
-        targets: 'node24-linux-x64,node24-linux-arm64,node24-macos-arm64',
-        release: true,
-      },
-    })
-    expect(pythonCompat.strategy).toMatchObject({ matrix: { python: ['3.10', '3.14'] } })
-    const pythonCompatSteps = JSON.stringify(pythonCompat.steps)
-    expect(pythonCompatSteps).toContain('dist/deepseek_harness_sdk-$VERSION-py3-none-any.whl')
-    expect(pythonCompatSteps).toContain('dist/deepseek_harness_runtime_bin-$VERSION-py3-none-manylinux_2_28_x86_64.whl')
-    expect(pythonCompatSteps).not.toContain('--find-links')
-    const validateSteps = JSON.stringify(validate.steps)
-    const authorize = validate.steps.filter(isRecord).find(step => step.name === 'Authorize publication request')
-    if (!isRecord(authorize) || typeof authorize.run !== 'string') {
-      throw new TypeError('Python release validation must authorize publication requests')
-    }
-    expect(validateSteps).toContain('PUBLIC_PYPI_RELEASE_ENABLED')
-    expect(authorize).toMatchObject({
-      env: {
-        PYPI_PUBLISHER_REPOSITORY: '${{ vars.PYPI_PUBLISHER_REPOSITORY }}',
-        REPOSITORY: '${{ github.repository }}',
-      },
-    })
-    expect(authorize.run).toContain('[ "$REPOSITORY" = "$PYPI_PUBLISHER_REPOSITORY" ]')
-    expect(validateSteps).toContain('100000000')
-    expect(publishRuntime).toMatchObject({
-      if: "github.event_name == 'workflow_dispatch' && inputs.publish",
-      needs: 'validate',
-      environment: 'pypi-runtime',
-      permissions: { contents: 'read', 'id-token': 'write' },
-    })
-    expect(publishSdk).toMatchObject({
-      if: "github.event_name == 'workflow_dispatch' && inputs.publish",
-      needs: ['validate', 'publish-runtime'],
-      environment: 'pypi',
-      permissions: { contents: 'read', 'id-token': 'write' },
-    })
-    const runtimeSteps = publishRuntime.steps.filter(isRecord)
-    const sdkSteps = publishSdk.steps.filter(isRecord)
-    const runtimePublish = runtimeSteps.find(step => step.name === 'Publish runtime wheels')
-    const sdkPublish = sdkSteps.find(step => step.name === 'Publish SDK wheel')
-    const runtimeHashes = runtimeSteps.find(step => step.name === 'Verify release artifact hashes')
-    const sdkHashes = sdkSteps.find(step => step.name === 'Verify release artifact hashes')
-    expect([...runtimeSteps, ...sdkSteps].some(
-      step => typeof step.uses === 'string' && step.uses.startsWith('actions/checkout@'),
-    )).toBe(false)
-    expect([...runtimeSteps, ...sdkSteps].filter(
-      step => step.uses === 'pypa/gh-action-pypi-publish@release/v1',
-    )).toHaveLength(2)
-    expect(runtimePublish).toMatchObject({
-      with: { 'packages-dir': 'dist/runtime/', attestations: false },
-    })
-    expect(sdkPublish).toMatchObject({
-      with: { 'packages-dir': 'dist/sdk/', attestations: false },
-    })
-    expect(runtimeHashes).toMatchObject({ run: 'cd dist && sha256sum -c SHA256SUMS' })
-    expect(sdkHashes).toMatchObject({ run: 'cd dist && sha256sum -c SHA256SUMS' })
-  })
-
-  it('exposes the native wheel builder to the release caller with normalized versions', () => {
+describe('Packaged Python runtime workflow', () => {
+  it('exposes the native wheel builder to CI with normalized versions', () => {
     const workflow = loadWorkflow('.github/workflows/build-exe-for-python-sdk.yml')
     const call = workflowEvent(workflow, 'workflow_call')
     const plan = workflowJob(workflow, 'plan')
@@ -374,13 +293,12 @@ describe('Python release workflows', () => {
     expect(call.inputs).toHaveProperty('targets')
     expect(call.inputs).toMatchObject({
       ci: { type: 'boolean', default: false },
-      release: { type: 'boolean', default: false },
     })
     expect(workflow.concurrency).toMatchObject({
       group: 'build-single-exe-${{ github.workflow }}-${{ github.ref }}',
     })
     expect(plan.if).toContain('inputs.ci')
-    expect(plan.if).toContain('inputs.release')
+    expect(plan.if).not.toContain('inputs.release')
     expect(JSON.stringify(plan.steps)).toContain('pep440_version')
     const workflowJson = JSON.stringify(workflow)
     expect(workflowJson).toContain('macosx_14_0_arm64')
@@ -402,24 +320,6 @@ describe('Python release workflows', () => {
     expect(JSON.stringify(macosCheck)).toContain('$EXE-spawn-helper')
     expect(manylinuxSmoke).toMatchObject({ if: "runner.os == 'Linux'" })
     expect(JSON.stringify(manylinuxSmoke)).toContain('-e DSH_TELEMETRY_DISABLED')
-  })
-
-  it('uses the shared macOS deployment-target check in GitLab', () => {
-    const workflow = loadWorkflow('.gitlab-ci.yml')
-    const runtimeWheel = workflow['.runtime-wheel']
-    if (!isRecord(runtimeWheel) || !Array.isArray(runtimeWheel.script)) {
-      throw new TypeError('GitLab CI must define the runtime wheel script')
-    }
-    const runtimeScript: unknown[] = runtimeWheel.script
-    const macosCheck = runtimeScript.find(
-      step => typeof step === 'string' && step.includes('PLATFORM" = macos-arm64'),
-    )
-    if (typeof macosCheck !== 'string') {
-      throw new TypeError('GitLab CI must check the macOS deployment target')
-    }
-
-    expect(macosCheck).toContain('scripts/check-macos-deployment-target.py')
-    expect(macosCheck).toContain('"$EXE" "$EXE-spawn-helper"')
   })
 })
 
@@ -453,7 +353,7 @@ describe('Desktop release workflow', () => {
     const buildExecutable = buildSteps.find(step => step.name === 'Build native single-file executable')
     const windowsSmoke = buildSteps.find(step => step.name === 'Smoke standalone runtime (Windows)')
     const upload = buildSteps.find(step => step.uses === 'actions/upload-artifact@v7')
-    expect(buildWorkspace).toMatchObject({ run: 'pnpm run build' })
+    expect(buildWorkspace).toMatchObject({ run: 'pnpm run build:official' })
     expect(buildExecutable).toMatchObject({
       run: 'pnpm run build:desktop-exe -- --target=${{ matrix.target }} --skip-build',
     })
@@ -477,6 +377,39 @@ describe('Desktop release workflow', () => {
     expect(publication).toContain('SHA256SUMS')
     expect(publication).toContain('gh release create')
     expect(publication).toContain('gh release edit')
+  })
+})
+
+describe('Binary-only publication policy', () => {
+  it('keeps the desktop GitHub Release as the only public release path', () => {
+    const workflowDir = resolve(root, '.github/workflows')
+    const workflowFiles = readdirSync(workflowDir)
+      .filter(file => file.endsWith('.yml') || file.endsWith('.yaml'))
+      .sort()
+    expect(workflowFiles).toContain('desktop-release.yml')
+    expect(workflowFiles).not.toContain('release.yml')
+    expect(workflowFiles).not.toContain('release-vendor.yml')
+    expect(workflowFiles).not.toContain('release-publish.yml')
+    expect(workflowFiles).not.toContain('release-vendor-publish.yml')
+    expect(workflowFiles).not.toContain('python-release.yml')
+    expect(workflowFiles).not.toContain('landlock-run-release.yml')
+    expect(existsSync(resolve(root, '.gitlab-ci.yml'))).toBe(false)
+
+    const forbiddenPublicationMarkers = [
+      'npm publish',
+      'pnpm publish',
+      'pypa/gh-action-pypi-publish',
+      'twine upload',
+      'uv publish',
+      'pnpm run release:publish',
+      'node ./scripts/publish-release.mjs',
+    ]
+    for (const file of workflowFiles) {
+      const source = readFileSync(resolve(workflowDir, file), 'utf8')
+      for (const marker of forbiddenPublicationMarkers) {
+        expect(source, `${file} must not publish ${marker}`).not.toContain(marker)
+      }
+    }
   })
 })
 
@@ -515,31 +448,8 @@ describe('Issue lifecycle workflow', () => {
   })
 })
 
-describe('npm release workflows', () => {
-  it('keeps publication dispatch-only and pack in the PR workflow', () => {
-    // pack stays in the PR/master release workflows so a PR proves the set packs.
-    for (const file of ['release.yml', 'release-vendor.yml']) {
-      const workflow = loadWorkflow(`.github/workflows/${file}`)
-      if (!isRecord(workflow.jobs)) throw new TypeError(`${file} must define jobs`)
-      expect(Object.keys(workflow.jobs).sort()).toEqual(['pack'])
-    }
-
-    // publication is workflow_dispatch-only (never a PR check) and keeps the
-    // npm-publish environment plus the shared dist-tag group.
-    for (const file of ['release-publish.yml', 'release-vendor-publish.yml']) {
-      const workflow = loadWorkflow(`.github/workflows/${file}`)
-      if (!isRecord(workflow.on) || !isRecord(workflow.jobs)) throw new TypeError(`${file} must define on and jobs`)
-      expect(Object.keys(workflow.on)).toEqual(['workflow_dispatch'])
-      const publish = workflow.jobs.publish
-      if (!isRecord(publish)) throw new TypeError(`${file} must define a publish job`)
-      expect(publish.environment).toBe('npm-publish')
-      expect(publish.concurrency).toMatchObject({ group: 'Release-publish' })
-    }
-  })
-})
-
 describe('Documentation site publication', () => {
-  it('keeps Pages deployment dispatch-only from a dsh-v* tag', () => {
+  it('keeps Pages deployment dispatch-only from a desktop-v* tag', () => {
     const workflow = loadWorkflow('.github/workflows/docs-pages.yml')
     const build = workflowJob(workflow, 'build')
     const deploy = workflowJob(workflow, 'deploy')
@@ -551,20 +461,15 @@ describe('Documentation site publication', () => {
     // publication must never appear as a PR check.
     expect(Object.keys(workflow.on)).toEqual(['workflow_dispatch'])
 
-    // RELEASE_PUBLISH makes release:verify reject every ref that is not a dsh-v*
-    // tag naming this tree's version, so the site and the npm sequence share one
-    // definition of a released version.
     const steps = build.steps.filter(isRecord)
     const verify = steps.find(step => step.name === 'Verify release version')
-    const checkout = steps.find(
-      step => typeof step.uses === 'string' && step.uses.startsWith('actions/checkout@'),
-    )
     expect(verify).toMatchObject({
-      env: { RELEASE_PUBLISH: 'true' },
-      run: 'pnpm run release:verify --family dsh',
+      env: {
+        REF_NAME: '${{ github.ref_name }}',
+        REF_TYPE: '${{ github.ref_type }}',
+      },
     })
-    // Complete history: the release scripts read tags.
-    expect(checkout).toMatchObject({ with: { 'fetch-depth': 0 } })
+    expect(verify?.run).toContain('desktop-v$version')
 
     // Projected source links stay on the public repository's master. That
     // repository advances only to each release commit, so its master never

@@ -21,7 +21,7 @@ import type {
 } from '@deepseek-ai/dsh-subprocess'
 import { childEnv, spawnSubprocess } from './spawn.ts'
 import type { LocalSubprocessHandle, SpawnInternals } from './spawn.ts'
-import { createProcessInspector } from './process-inspector.ts'
+import { createRuntimeProcessInspector } from './process-inspector.ts'
 import type { ProcessInspector } from './process-inspector.ts'
 import { LocalTerminalHandle, type TerminalBackend, type TerminalDisposable } from './terminal.ts'
 
@@ -240,7 +240,7 @@ export class LocalSubprocessRuntime extends SubprocessRuntime {
       throw new Error('subprocess-local: terminal argv must contain a program')
     }
     spec.signal?.throwIfAborted()
-    const inspector = this.terminalInspector ?? createProcessInspector()
+    const inspector = this.terminalInspector ?? await createRuntimeProcessInspector()
     const terminal = await spawnTerminalBackend(file, [...spec.argv.slice(1)], spec)
     const handle = new LocalTerminalHandle(terminal, inspector, spec.graceMs)
     this.terminals.add(handle)

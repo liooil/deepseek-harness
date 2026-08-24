@@ -17,7 +17,7 @@ export interface TerminalDisposable { dispose(): void }
 export interface TerminalBackend {
   readonly pid: number
   write(data: string): void
-  kill(signal: string): void
+  kill(signal?: string): void
   onData(callback: (data: string) => void): TerminalDisposable
   onExit(callback: (event: { exitCode: number; signal?: number }) => void): TerminalDisposable
 }

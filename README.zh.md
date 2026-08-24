@@ -14,15 +14,16 @@ DeepSeek Harness 目前处于 _开发者预览_ 阶段，正在快速迭代。**
 
 ## 运行
 
-### 通过 `npm` 运行
+### 运行桌面二进制
 
-安装 `Node.js`，然后运行：
+从 [GitHub Releases](https://github.com/liooil/deepseek-harness/releases) 下载匹配的 `dsh-desktop-{linux,windows,macos}-{x64,arm64}` 可执行文件。Release 可执行文件包含服务端和 Web UI，不需要安装 Node.js、Bun 或 npm。
 
 ```sh
-npx @deepseek-ai/dsh web
+chmod +x ./dsh-desktop-linux-x64
+./dsh-desktop-linux-x64
 ```
 
-该命令默认会在 `http://127.0.0.1:3080` 启动 Web UI，本机启动时还会用默认浏览器打开页面。通过 SSH 启动时只打印宿主机 URL，因为本地转发地址由 SSH 客户端或编辑器持有。传入 `--no-open` 可仅运行服务器而不打开浏览器。详见 [Web UI 指南](docs/user/guide/index.zh.md)。
+在 Windows 上直接运行 `.exe` 文件。Linux webview 模式需要 WebKit2GTK 4.1；Windows webview 模式需要 WebView2。使用 `--browser` 打开独立浏览器窗口，或使用 `--smoke --cwd <directory>` 在不打开窗口的情况下验证 Release。详见[桌面启动器指南](apps/desktop/README.zh.md)。
 
 <a id="run-from-source"></a>
 
@@ -31,7 +32,7 @@ npx @deepseek-ai/dsh web
 如需从仓库源码运行：
 
 ```sh
-git clone https://github.com/deepseek-ai/deepseek-harness.git
+git clone https://github.com/liooil/deepseek-harness.git
 cd deepseek-harness
 pnpm install
 pnpm run build
@@ -46,8 +47,7 @@ pnpm dsh web
 pnpm desktop
 ```
 
-Windows 和 Linux 默认使用系统 webview，macOS 默认使用独立浏览器窗口。可通过 `pnpm desktop --webview` 或 `pnpm desktop --browser` 显式选择任一模式。要求和选项详见[桌面启动器指南](apps/desktop/README.zh.md)。
-`pnpm run build` 会准备仓库产物。`pnpm dsh web` 会直接使用这些已构建产物，不会重新构建。
+Windows 和 Linux 默认使用系统 webview，macOS 默认使用独立浏览器窗口。可通过 `pnpm desktop --webview` 或 `pnpm desktop --browser` 显式选择任一模式。要求和选项详见[桌面启动器指南](apps/desktop/README.zh.md)。`pnpm run build` 会准备仓库产物。`pnpm dsh web` 会直接使用这些已构建产物，不会重新构建。
 
 ## 社区与支持
 

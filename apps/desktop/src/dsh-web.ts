@@ -10,6 +10,7 @@ import { configureRipgrepPath, resolveRgPath } from '@deepseek-ai/dsh-tool-fs-se
 import { verifyWorkflowWorkerEntry } from '@deepseek-ai/dsh-workflow-worker-thread'
 import { dlopen, FFIType } from 'bun:ffi'
 import { shouldPreloadSharpLibrary } from './native-library.ts'
+import { configureDesktopNativePackageAnchor } from './native-package.ts'
 import { type EmbeddedDshRuntime, materializeDshRuntime } from './runtime-cache.ts'
 
 let embeddedRuntime: EmbeddedDshRuntime | undefined
@@ -58,6 +59,7 @@ async function resolveRuntime(): Promise<{
   const require = createRequire(installAnchor)
   const packageRoot = dirname(installAnchor)
   if (materialized !== undefined) {
+    configureDesktopNativePackageAnchor(installAnchor)
     const platform = process.platform === 'win32' ? 'win32' : process.platform === 'darwin' ? 'darwin' : 'linux'
     const nativePackage = process.platform === 'win32'
       ? `sharp-${platform}-${process.arch}`
@@ -151,7 +153,7 @@ export async function startDshWeb(options: { cwd: string; port: number }): Promi
     environment: loadLayeredEnv('dsh'),
     profile: 'web',
     patchFiles: [],
-    args: ['--port', String(options.port)],
+    args: ['--port', String(options.port), '--no-open'],
     installAnchor: runtime.installAnchor,
     shippedPresetRoot: runtime.shippedPresetRoot,
     bareModuleImporter: importer,
@@ -238,7 +240,7 @@ export async function startDshWeb(options: { cwd: string; port: number }): Promi
       }
     },
     stop() {
-      stopPromise ??= shutdown.shutdown(0).then(async () => exited)
+      if (stopPromise === undefined) stopPromise = shutdown.shutdown(0).then(async () => exited)
       return stopPromise
     },
   }
