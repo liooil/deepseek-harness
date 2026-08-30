@@ -61,6 +61,9 @@ jobs:
 
       - name: Typecheck
         run: pnpm run typecheck
+      - name: Build official workspace
+        run: pnpm run build:official
+
 
       - name: Hygiene
         run: pnpm run hygiene
@@ -71,34 +74,6 @@ jobs:
       - name: Check expected-output filenames
         shell: bash
         run: scripts/check-expected-filenames.sh
-
-  linux-smoke:
-    name: desktop smoke / linux-x64
-    needs: static
-    runs-on: ubuntu-24.04
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@v6
-
-      - uses: pnpm/action-setup@v4
-        with:
-          dest: ${{ runner.temp }}/setup-pnpm-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}
-
-      - uses: actions/setup-node@v6
-        with:
-          node-version: ${{ env.PRIMARY_NODE_VERSION }}
-          cache: pnpm
-
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: ${{ env.BUN_VERSION }}
-
-      - name: Install (immutable)
-        run: pnpm install --frozen-lockfile
-
-      - name: Build official workspace
-        run: pnpm run build:official
-
       - name: Build desktop executable
         run: pnpm run build:desktop-exe -- --target=linux-x64 --skip-build
 
@@ -109,6 +84,7 @@ jobs:
           product=dist-desktop/dsh-desktop-linux-x64
           "$product" --version
           "$product" --smoke --cwd "$PWD"
+
 
   native-smoke:
     name: desktop smoke / ${{ matrix.target }}

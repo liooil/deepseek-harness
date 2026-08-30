@@ -50,10 +50,10 @@ describe('desktop repository workflows', () => {
     expect(staticCommands.join('\n')).toContain('apps/desktop/tests')
     expect(staticCommands.join('\n')).toContain('scripts/ci-workflow.spec.ts')
 
-    const linux = workflowJob(workflow, 'linux-smoke')
-    expect(commands(linux)).toContain('pnpm run build:desktop-exe -- --target=linux-x64 --skip-build')
-    expect(commands(linux).join('\n')).toContain('dsh-desktop-linux-x64')
-    expect(commands(linux).join('\n')).toContain('--smoke')
+    expect(staticCommands).toContain('pnpm run build:official')
+    expect(staticCommands).toContain('pnpm run build:desktop-exe -- --target=linux-x64 --skip-build')
+    expect(staticCommands.join('\n')).toContain('dsh-desktop-linux-x64')
+    expect(staticCommands.join('\n')).toContain('--smoke')
 
     const native = workflowJob(workflow, 'native-smoke')
     if (!isPlainObject(native.strategy)) throw new TypeError('native-smoke must define a strategy')
