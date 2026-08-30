@@ -39,8 +39,6 @@ import { SandboxProvider, SandboxUnavailableError } from '@deepseek-ai/dsh-sandb
 import type { ConfinedArgv, ConfinedSandboxMode, RunnerFailureRule, SandboxEnforcement, SandboxPolicy } from '@deepseek-ai/dsh-sandbox'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import type { AclWriteGrant } from '@deepseek-ai/dsh-sandbox-windows-acl'
-import { assertTempRootOutsideWorkspace } from '@deepseek-ai/dsh-sandbox-windows-acl/src/path-boundary.ts'
-import { tempWriteSid, workspaceWriteSid } from '@deepseek-ai/dsh-sandbox-windows-acl/src/workspace-sid.ts'
 import { bwrapProfileArgs, landlockProfileArgs, seatbeltProfileArgs } from './profiles.ts'
 
 /** Plugin config. All optional — `static Config` supplies the defaults. */
@@ -136,6 +134,8 @@ export interface SandboxInternals {
   windowsAclRunnerEntry?: string
   /** Replaces the functional windows-acl probe (the win32 chain's sole rung — only consulted if that chain ever grows). */
   probeWindowsAcl?: () => boolean
+  /** Replaces temp-root separation validation for native-boundary tests. */
+  assertTempRootOutsideWorkspace?: (workspaceRoot: string, tempRoot: string) => void
   /** Replaces deterministic workspace capability derivation for native-boundary tests. */
   workspaceWriteSid?: (workspaceRoot: string) => string
   /** Replaces private temp capability derivation for native-boundary tests. */
@@ -156,13 +156,20 @@ interface AclTempCapability {
   grant: AclWriteGrant
 }
 
-function createAclWriteGrant(writeSid: string): AclWriteGrant {
-  const packageName: string = '@deepseek-ai/dsh-sandbox-windows-acl'
-  const runtime = createRequire(import.meta.url)(packageName) as { AclWriteGrant: typeof AclWriteGrant }
-  return runtime.AclWriteGrant.create(writeSid)
+interface WindowsAclRuntime {
+  AclWriteGrant: { create(writeSid: string): AclWriteGrant }
+  assertTempRootOutsideWorkspace(workspaceRoot: string, tempRoot: string): void
+  workspaceWriteSid(workspaceRoot: string): string
+  tempWriteSid(tempDir: string): string
 }
 
+let windowsAclRuntime: WindowsAclRuntime | undefined
 
+function loadWindowsAclRuntime(): WindowsAclRuntime {
+  const packageName: string = '@deepseek-ai/dsh-sandbox-windows-acl'
+  windowsAclRuntime ??= createRequire(import.meta.url)(packageName) as WindowsAclRuntime
+  return windowsAclRuntime
+}
 /**
  * The runner chain per platform — selection is BY PLATFORM first, probes
  * second: a platform's chain is probed in preference order only when it has
@@ -387,7 +394,8 @@ export class LocalSandboxProvider extends SandboxProvider {
       '--workspace', policy.workspaceRoot,
       '--temp', temp.dir,
       '--mode', policy.mode,
-      '--write-sid', this.internals.workspaceWriteSid?.(policy.workspaceRoot) ?? workspaceWriteSid(policy.workspaceRoot),
+      '--write-sid', this.internals.workspaceWriteSid?.(policy.workspaceRoot)
+        ?? loadWindowsAclRuntime().workspaceWriteSid(policy.workspaceRoot),
       '--temp-write-sid', temp.writeSid,
     ]
   }
@@ -406,10 +414,14 @@ export class LocalSandboxProvider extends SandboxProvider {
    * @returns the pair's private temp directory and write capability.
    */
   private materializeAclGrant(sessionId: SessionId, workspaceRoot: string): AclTempCapability {
-    assertTempRootOutsideWorkspace(workspaceRoot, tmpdir())
-    const writeSid = this.internals.workspaceWriteSid?.(workspaceRoot) ?? workspaceWriteSid(workspaceRoot)
+    const assertTempRoot = this.internals.assertTempRootOutsideWorkspace
+    if (assertTempRoot === undefined) loadWindowsAclRuntime().assertTempRootOutsideWorkspace(workspaceRoot, tmpdir())
+    else assertTempRoot(workspaceRoot, tmpdir())
+    const writeSid = this.internals.workspaceWriteSid?.(workspaceRoot)
+      ?? loadWindowsAclRuntime().workspaceWriteSid(workspaceRoot)
     if (!this.workspaceGrants.has(workspaceRoot)) {
-      const grant = this.internals.createAclWriteGrant?.(writeSid) ?? createAclWriteGrant(writeSid)
+      const grant = this.internals.createAclWriteGrant?.(writeSid)
+        ?? loadWindowsAclRuntime().AclWriteGrant.create(writeSid)
       try {
         grant.add(workspaceRoot, true)
       } catch (error) {
@@ -429,10 +441,11 @@ export class LocalSandboxProvider extends SandboxProvider {
     const existing = this.tempCapabilities.get(key)
     if (existing !== undefined) return existing
     const tempDir = mkdtempSync(join(tmpdir(), 'dsh-'))
-    const tempSid = this.internals.tempWriteSid?.(tempDir) ?? tempWriteSid(tempDir)
+    const tempSid = this.internals.tempWriteSid?.(tempDir) ?? loadWindowsAclRuntime().tempWriteSid(tempDir)
     let grant: AclWriteGrant | undefined
     try {
-      grant = this.internals.createAclWriteGrant?.(tempSid) ?? createAclWriteGrant(tempSid)
+      grant = this.internals.createAclWriteGrant?.(tempSid)
+        ?? loadWindowsAclRuntime().AclWriteGrant.create(tempSid)
       grant.add(tempDir)
     } catch (error) {
       const cleanupFailures: unknown[] = []
