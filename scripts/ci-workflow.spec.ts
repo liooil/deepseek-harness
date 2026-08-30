@@ -39,6 +39,7 @@ describe('desktop repository workflows', () => {
     const push = workflowEvent(workflow, 'push')
     expect(push.branches).toEqual(['master', 'sync/upstream-**'])
     expect(workflow.concurrency).toMatchObject({ 'cancel-in-progress': true })
+    expect(workflow.env).toMatchObject({ BUN_VERSION: '1.4.0' })
 
     const staticJob = workflowJob(workflow, 'static')
     const staticCommands = commands(staticJob)
@@ -143,6 +144,7 @@ describe('desktop publication', () => {
     const build = workflowJob(workflow, 'build')
     const publish = workflowJob(workflow, 'publish')
     if (!isPlainObject(dispatch.inputs)) throw new TypeError('desktop release must define inputs')
+    expect(workflow.env).toMatchObject({ BUN_VERSION: '1.4.0' })
     const inputs = dispatch.inputs as Record<string, unknown>
     if (!isPlainObject(inputs.publish)) throw new TypeError('desktop release must define the publish input')
     if (!isPlainObject(build.strategy)) throw new TypeError('desktop release must define a strategy')

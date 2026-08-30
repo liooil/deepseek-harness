@@ -28,7 +28,7 @@ Provide focused host compatibility at the packages that own the affected capabil
 - The image provider accepts a configured Sharp loader. The target build statically embeds Sharp's addon, while startup preloads the extracted target libvips library.
 - The search provider accepts the extracted packaged-ripgrep path instead of discovering its optional platform package at runtime.
 - Package metadata uses JSON imports where a runtime `createRequire` was only serving static data. Windows-only picker, ACL, and Koffi paths remain lazy and platform-gated.
-- Windows native integrations require Koffi 3.1.6 or newer; earlier Koffi finalizers crash the Bun Windows host after an otherwise successful shutdown.
+- Windows native integrations use Koffi 3.1.6 or newer and require Bun 1.4.0 or newer; Bun 1.3.14 crashes while finalizing Koffi after an otherwise successful shutdown.
 
 Keep the BunDesk window contract: `--browser`, `--webview`, and `--provider` select the presentation; Windows and Linux default to webview and macOS defaults to browser. Closing a managed window or receiving `SIGINT` or `SIGTERM` disposes the in-process Cordis composition. An in-process server shutdown closes the window. The OS URL-opener fallback remains externally managed and therefore cannot report browser closure.
 
