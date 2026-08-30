@@ -90,6 +90,8 @@ jobs:
             *) echo "::error::Unsupported Linux runner architecture $RUNNER_ARCH"; exit 1 ;;
           esac
           addon_dir="$(realpath packages/subprocess/subprocess-local/node_modules/node-pty)"
+          pnpm_setup_root="$(realpath "$(dirname "$(dirname "$PNPM_HOME")")")"
+          (cd "$addon_dir" && npm_config_build_from_source=true pnpm run install)
           addon="$addon_dir/build/Release/pty.node"
           [ -f "$addon_dir/build/Makefile" ] || {
             echo "::error::node-pty install did not generate $addon_dir/build/Makefile"
@@ -99,7 +101,7 @@ jobs:
             --user "$(id -u):$(id -g)" \
             -v "$PWD:$PWD" \
             -v "$HOME/.cache/node-gyp:$HOME/.cache/node-gyp:ro" \
-            -v "$RUNNER_TEMP/setup-pnpm:$RUNNER_TEMP/setup-pnpm:ro" \
+            -v "$pnpm_setup_root:$pnpm_setup_root:ro" \
             -w "$addon_dir" \
             "$image" \
             bash -euxo pipefail -c \
@@ -204,7 +206,9 @@ jobs:
             exit 1
           fi
           if [ -z "$state" ]; then
-            gh release create "$TAG" --verify-tag --draft \
+            prerelease=()
+            if [[ "${TAG#desktop-v}" == *-* ]]; then prerelease=(--prerelease); fi
+            gh release create "$TAG" --verify-tag --draft "${prerelease[@]}" \
               --title "DeepSeek Harness Desktop ${TAG#desktop-v}" \
               --notes "Single-file desktop executables for Linux, Windows, and macOS. Linux webview mode requires WebKit2GTK 4.1; Windows webview mode requires WebView2."
           fi

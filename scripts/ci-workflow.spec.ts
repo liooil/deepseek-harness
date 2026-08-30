@@ -165,6 +165,7 @@ describe('desktop publication', () => {
       { target: 'macos-arm64', runner: 'macos-15', output: 'dsh-desktop-macos-arm64' },
     ])
     expect(commands(build)).toContain('pnpm run build:official')
+    expect(commands(build).join('\n')).toContain('npm_config_build_from_source=true pnpm run install')
     expect(commands(build)).toContain('pnpm run build:desktop-exe -- --target=${{ matrix.target }} --skip-build')
     expect(commands(build).join('\n')).toContain('--smoke')
 
@@ -177,6 +178,7 @@ describe('desktop publication', () => {
     expect(publication).toContain('desktop-v$version')
     expect(publication).toContain('SHA256SUMS')
     expect(publication).toContain('gh release create')
+    expect(publication).toContain('--prerelease')
     expect(publication).toContain('gh release edit')
   })
 
