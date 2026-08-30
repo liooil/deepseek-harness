@@ -146,8 +146,8 @@ describe('CI workflow', () => {
     expect(wineAptCache.if).toBe("github.event_name == 'push' && github.ref == 'refs/heads/master'")
     expect(wineAptCache['runs-on']).toBe('ubuntu-latest')
 
-    // serial-windows: master-only standby, self-hosted, non-blocking, lives in ci-master.
-    expect(serialWindows.if).toBe("github.event_name == 'push' && github.ref == 'refs/heads/master'")
+    // serial-windows: canonical-repository master standby, self-hosted and non-blocking.
+    expect(serialWindows.if).toBe("github.repository == 'deepseek-ai/deepseek-harness' && github.event_name == 'push' && github.ref == 'refs/heads/master'")
     expect(serialWindows['runs-on']).toEqual(['self-hosted', 'dsh-win-ci', 'windows'])
     expect(serialWindows.name).toBe('serial / windows (self-hosted standby)')
 
@@ -225,8 +225,9 @@ describe('CI workflow', () => {
       const job = workflow.jobs[name]
       if (!isRecord(job)) throw new TypeError(`${name} must be defined`)
       expect(job.concurrency).toBeUndefined()
-      // Both stay master-push-only; that is what makes the push carve-out safe.
-      expect(job.if).toBe("github.event_name == 'push' && github.ref == 'refs/heads/master'")
+      // Both stay canonical-repository master-push-only, so forks never queue
+      // against organization-owned standby pools.
+      expect(job.if).toBe("github.repository == 'deepseek-ai/deepseek-harness' && github.event_name == 'push' && github.ref == 'refs/heads/master'")
     }
 
     // What bounds the cost of exempting push: a master push may only carry the
@@ -235,6 +236,7 @@ describe('CI workflow', () => {
     const NOT_PUSH_REACHABLE = new Set([
       "github.event_name == 'workflow_dispatch' && inputs.suite == 'larger-runner-benchmark'",
       "github.event_name == 'workflow_dispatch' && inputs.suite == 'consolidated-runner-benchmark'",
+      "github.repository == 'deepseek-ai/deepseek-harness' && github.event_name == 'push' && github.ref == 'refs/heads/master'",
     ])
     const pushReachable = Object.entries(workflow.jobs)
       .filter(([, job]) => {
@@ -246,7 +248,7 @@ describe('CI workflow', () => {
       })
       .map(([name]) => name)
       .sort()
-    expect(pushReachable).toEqual(['serial-linux-selfhosted', 'serial-windows', 'wine-apt-cache'])
+    expect(pushReachable).toEqual(['wine-apt-cache'])
 
     // Why workflow_dispatch must keep cancelling: each benchmark fans out to a
     // dozen larger runners at once, in this same group on master. If it stopped
