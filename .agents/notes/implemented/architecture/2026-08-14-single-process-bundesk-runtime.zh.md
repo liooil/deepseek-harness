@@ -28,6 +28,7 @@ Status: implemented
 - 图像 provider 接受可配置的 Sharp loader。目标构建静态嵌入 Sharp addon，启动时预加载解压出的目标 libvips 动态库。
 - 搜索 provider 接受解压后的 packaged-ripgrep 路径，不再在运行时发现 optional 平台包。
 - 仅为读取静态数据而使用 `createRequire` 的包改用 JSON import。Windows 专用 picker、ACL 和 Koffi 路径继续延迟加载并受平台条件保护。
+- Windows 原生集成要求 Koffi 3.1.6 或更高版本；更早版本的 Koffi finalizer 会在原本成功的关闭流程结束后导致 Bun Windows 宿主崩溃。
 
 保留 BunDesk 窗口约定：`--browser`、`--webview` 和 `--provider` 选择展示方式；Windows 与 Linux 默认使用 webview，macOS 默认使用 browser。关闭受管窗口或收到 `SIGINT`／`SIGTERM` 时，程序会 dispose 进程内 Cordis composition。进程内服务关闭时会关闭窗口。OS URL opener 回退仍由外部管理，因此无法报告浏览器关闭。
 
