@@ -11,9 +11,7 @@ const ACTIVE_WORKFLOWS = [
   'desktop-ci.yml',
   'desktop-release.yml',
   'docs-pages.yml',
-  'e2b-e2e.yml',
   'e2e.yml',
-  'pi-ai-provider-e2e.yml',
   'sandbox.yml',
   'upstream-sync.yml',
 ] as const
@@ -104,12 +102,10 @@ describe('desktop repository workflows', () => {
     expect(source).not.toContain('HEAD:master')
   })
 
-  it('keeps credentialed provider suites manual-only', () => {
-    for (const file of ['e2e.yml', 'e2b-e2e.yml', 'pi-ai-provider-e2e.yml']) {
-      const workflow = loadWorkflow(`.github/workflows/${file}`)
-      expect(workflowEvents(workflow), file).toEqual(['workflow_dispatch'])
-    }
-    const realApi = workflowJob(loadWorkflow('.github/workflows/e2e.yml'), 'e2e')
+  it('keeps credentialed real-API validation manual-only', () => {
+    const workflow = loadWorkflow('.github/workflows/e2e.yml')
+    expect(workflowEvents(workflow)).toEqual(['workflow_dispatch'])
+    const realApi = workflowJob(workflow, 'e2e')
     expect(realApi.if).toBeUndefined()
     expect(commands(realApi).join('\n')).toContain('DEEPSEEK_API_KEY is empty')
   })
