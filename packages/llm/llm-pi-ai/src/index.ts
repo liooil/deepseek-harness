@@ -121,10 +121,19 @@ function directoryEntries(
 ): LlmConfigurableProvider[] {
   const catalog = new Set(catalogProviderIds())
   const entries = new Map<string, LlmConfigurableProvider>()
-  const declare = (provider: string, displayName: string): void => {
+  for (const provider of catalog) {
     entries.set(provider, {
       provider,
-      displayName,
+      displayName: provider,
+      settingsNs: NS,
+      settingsPath: ['providers', provider],
+      declared: false,
+    })
+  }
+  for (const [provider, profile] of profiles) {
+    entries.set(provider, {
+      provider,
+      displayName: profile.displayName,
       settingsNs: NS,
       settingsPath: ['providers', provider],
       // Membership of the installed catalog, not of the settings document:
@@ -133,8 +142,6 @@ function directoryEntries(
       declared: !catalog.has(provider),
     })
   }
-  for (const provider of catalog) declare(provider, provider)
-  for (const [provider, profile] of profiles) declare(provider, profile.displayName)
   return [...entries.values()]
 }
 
