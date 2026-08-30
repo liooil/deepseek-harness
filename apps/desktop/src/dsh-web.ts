@@ -166,6 +166,12 @@ export async function startDshWeb(options: { cwd: string; port: number }): Promi
     await ctx.fiber.dispose()
     throw new Error('dsh web started without a webServer service')
   }
+  const connection = ctx.get('connection') as { authenticatedUrl(url: string): string } | undefined
+  if (connection === undefined) {
+    await ctx.fiber.dispose()
+    throw new Error('dsh web started without a connection service')
+  }
+  const webUrl = new URL(connection.authenticatedUrl(`http://127.0.0.1:${String(webServer.port)}`))
 
   let exitCode: number | null = null
   let resolveExited!: (code: number) => void
@@ -179,7 +185,7 @@ export async function startDshWeb(options: { cwd: string; port: number }): Promi
 
   let stopPromise: Promise<number> | undefined
   return {
-    url: new URL(`http://127.0.0.1:${String(webServer.port)}`),
+    url: webUrl,
     exited,
     get exitCode() {
       return exitCode
@@ -240,7 +246,7 @@ export async function startDshWeb(options: { cwd: string; port: number }): Promi
       }
     },
     stop() {
-      if (stopPromise === undefined) stopPromise = shutdown.shutdown(0).then(async () => exited)
+      stopPromise ??= shutdown.shutdown(0).then(async () => exited)
       return stopPromise
     },
   }

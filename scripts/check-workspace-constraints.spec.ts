@@ -1,9 +1,11 @@
-/** Experimental-package privacy and dependency constraints. */
+/** Experimental-package publication and dependency constraints. */
 
 import { describe, expect, it } from 'vitest'
 import {
   checkExperimentalDependencyIsolation,
   checkExperimentalManifest,
+  checkWorkspaceManifest,
+  expectedDshPackageFiles,
   type WorkspaceManifest,
 } from './check-workspace-constraints.ts'
 
@@ -34,7 +36,7 @@ describe('experimental workspace constraints', () => {
   })
 
   it.each(['dependencies', 'optionalDependencies', 'peerDependencies'] as const)(
-    'rejects runtime %s on an experimental package',
+    'rejects release %s on an experimental package',
     (section) => {
       expect(checkExperimentalDependencyIsolation([experimental, {
         dir: 'packages/core/consumer',
@@ -48,7 +50,7 @@ describe('experimental workspace constraints', () => {
     },
   )
 
-  it('allows development and experimental consumers but rejects the Python deployment root', () => {
+  it('allows development and experimental consumers but rejects the Python release runtime', () => {
     const manifests: WorkspaceManifest[] = [experimental, {
       dir: 'packages/core/test-only',
       manifest: {
@@ -71,6 +73,36 @@ describe('experimental workspace constraints', () => {
 
     expect(checkExperimentalDependencyIsolation(manifests)).toEqual([
       '@deepseek-ai/dsh-python-runtime: dependencies.@deepseek-ai/dsh-experimental-prototype must not reference an experimental package',
+    ])
+  })
+})
+
+describe('workspace publication constraints', () => {
+  it('requires private manifests without publication metadata', () => {
+    expect(checkWorkspaceManifest({
+      dir: 'vendor/cordis',
+      manifest: {
+        name: '@deepseek-ai/cordis',
+        private: false,
+        publishConfig: { access: 'public' },
+      },
+    })).toEqual([
+      '@deepseek-ai/cordis: package.json must set "private": true',
+      '@deepseek-ai/cordis: package.json must omit publishConfig; workspace packages are not published',
+    ])
+  })
+})
+
+describe('package payload constraints', () => {
+  it('includes a declared profile patch without a package-name allowlist', () => {
+    expect(expectedDshPackageFiles({
+      name: '@deepseek-ai/dsh-private-profile',
+      dsh: { bundle: { patch: './cordis.patch.yml' } },
+    })).toEqual([
+      'lib/index.js',
+      'lib/invariant.js',
+      'cordis.patch.yml',
+      'lib/types/**/*.d.ts',
     ])
   })
 })

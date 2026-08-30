@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
 import { DESKTOP_HELP, parseDesktopArgs } from './args.ts'
-import { embeddedDshRuntimeVersion, startDshWeb } from './dsh-web.ts'
+import { embeddedDshRuntimeVersion, startDshWeb, type DshWebSession } from './dsh-web.ts'
 import { openDesktopWindow, type DesktopWindow } from './window.ts'
 
 interface TerminationWatcher {
@@ -34,8 +34,28 @@ async function readVersion(): Promise<string> {
   return manifest.version
 }
 
-async function runSmoke(web: Awaited<ReturnType<typeof startDshWeb>>): Promise<void> {
-  const response = await fetch(web.url, { signal: AbortSignal.timeout(30_000) })
+async function runSmoke(web: DshWebSession): Promise<void> {
+  const request = { signal: AbortSignal.timeout(30_000) }
+  const login = await fetch(web.url, { ...request, redirect: 'manual' })
+  let cookie: string | undefined
+  let response = login
+  if (login.status >= 300 && login.status < 400) {
+    const location = login.headers.get('location')
+    const setCookie = login.headers.get('set-cookie')
+    if (location === null || setCookie === null) {
+      throw new Error('desktop smoke token exchange omitted its redirect or session cookie')
+    }
+    const sessionCookie = setCookie.split(';', 1)[0]
+    if (sessionCookie === undefined || sessionCookie === '') {
+      throw new Error('desktop smoke token exchange returned an empty session cookie')
+    }
+    cookie = sessionCookie
+    await login.body?.cancel()
+    response = await fetch(new URL(location, web.url), {
+      ...request,
+      headers: { cookie: sessionCookie },
+    })
+  }
   if (!response.ok) throw new Error(`desktop smoke request failed with HTTP ${response.status}`)
   const contentType = response.headers.get('content-type') ?? ''
   if (!contentType.includes('text/html')) {
@@ -49,11 +69,15 @@ async function runSmoke(web: Awaited<ReturnType<typeof startDshWeb>>): Promise<v
     if (path !== undefined) paths.add(path)
   }
   for (const match of html.matchAll(/(?:src|href)="([^"#]+)"/g)) {
-    if (match[1]?.startsWith('/')) paths.add(match[1])
+    const path = match[1]?.replaceAll('&amp;', '&')
+    if (path?.startsWith('/')) paths.add(path)
   }
   if (paths.size === 0) throw new Error('desktop smoke: UI declares no client resources')
   await Promise.all([...paths].map(async (path) => {
-    const asset = await fetch(new URL(path, web.url), { signal: AbortSignal.timeout(30_000) })
+    const asset = await fetch(new URL(path, web.url), {
+      ...request,
+      ...(cookie === undefined ? {} : { headers: { cookie } }),
+    })
     if (!asset.ok) throw new Error(`desktop smoke: UI resource ${path} returned HTTP ${asset.status}`)
     await asset.body?.cancel()
   }))

@@ -78,17 +78,16 @@ interface GenericSkip {
 }
 
 const GENERIC_SKIPS: readonly GenericSkip[] = [
-  // `vendorPackages` lists vendor/ directory names, joined with 'vendor' below it.
-  { file: 'packages/examples/acp-demo/tests/built-bin.e2e.ts', upstream: ['cordis', 'cosmokit', 'schemastery'] },
   // `Symbol.for('schemastery')` and the `vendor:` metadata field are upstream identifiers.
   { file: 'vendor/schemastery/src/index.ts', upstream: ['schemastery'] },
   // Asserts the vendored-manifest table, which gains an upstream-name column.
   { file: 'scripts/gen-third-party-notices.spec.ts', upstream: RENAMES.map(rename => rename.upstream) },
   // `cordis` is also an agent-preset id — the directory name under
-  // apps/cli/config/agent-presets/ — so in these files the bare name is
+  // packages/preset/agent-presets/presets/ — so in these files the bare name is
   // product data, not a package reference. Renaming it changed which preset
   // the creator flow stages and which id the roster reports.
   { file: 'packages/client/ui-agent-preset/src/client/AgentPresetSection.tsx', upstream: ['cordis'] },
+  { file: 'packages/preset/agent-presets/tests/shipped-root.spec.ts', upstream: ['cordis'] },
   { file: 'packages/client/ui-agent-preset/src/client/index.ts', upstream: ['cordis'] },
   { file: 'packages/client/ui-agent-preset/tests/apply.client.spec.ts', upstream: ['cordis'] },
   { file: 'packages/client/ui-agent-preset/tests/locales.client.spec.ts', upstream: ['cordis'] },
@@ -99,7 +98,7 @@ const GENERIC_SKIPS: readonly GenericSkip[] = [
   // The preset's own composition: its header comment and its system prompt name
   // the preset a model mounts, so the scoped name would send the model after an
   // id no roster reports.
-  { file: 'apps/cli/config/agent-presets/cordis/agent.cordis.yml', upstream: ['cordis'] },
+  { file: 'packages/preset/agent-presets/presets/cordis/agent.cordis.yml', upstream: ['cordis'] },
   // The preset-roster loop names the `cordis` preset id, not a package.
   { file: 'apps/cli/tests/windows-shell.spec.ts', upstream: ['cordis'] },
   // GROUP_ORDER holds `packages/<group>/` directory names, not package names.
@@ -160,9 +159,8 @@ const POSTCONDITIONS: readonly PostCondition[] = [
   // The preset ids in this table are product data, not package names.
   { file: 'packages/client/ui-agent-preset/tests/locales.client.spec.ts', text: '[\'cordis\', \'presetCordisName\'', count: 1 },
   // The preset id the shipped composition documents to its own model.
-  { file: 'apps/cli/config/agent-presets/cordis/agent.cordis.yml', text: 'The `cordis` agent preset', count: 1 },
-  { file: 'apps/cli/config/agent-presets/cordis/agent.cordis.yml', text: 'corrupting the `cordis` preset', count: 1 },
-  { file: 'packages/examples/acp-demo/tests/built-bin.e2e.ts', text: '\'cordis\', \'loader\', \'include\', \'timer\', \'hmr\', \'logger-console\',', count: 1 },
+  { file: 'packages/preset/agent-presets/presets/cordis/agent.cordis.yml', text: 'The `cordis` agent preset', count: 1 },
+  { file: 'packages/preset/agent-presets/presets/cordis/agent.cordis.yml', text: 'corrupting the `cordis` preset', count: 1 },
 ]
 
 /**
@@ -250,14 +248,14 @@ const EXACT_EDITS: readonly ExactEdit[] = [
     id: 'agent-spine-demo-mounted-tree',
     file: 'packages/examples/agent-spine-demo/README.md',
     find: '@cordisjs/plugin-timer            timer service',
-    replace: '@deepseek-ai/cordis-plugin-timer  timer service',
+    replace: '@deepseek-ai/cordis-plugin-timer      timer service (writes nothing to stdout)',
     expect: 1,
   },
   {
     id: 'agent-spine-demo-mounted-tree-zh',
     file: 'packages/examples/agent-spine-demo/README.zh.md',
     find: '@cordisjs/plugin-timer            timer service',
-    replace: '@deepseek-ai/cordis-plugin-timer  timer service',
+    replace: '@deepseek-ai/cordis-plugin-timer      timer service (writes nothing to stdout)',
     expect: 1,
   },
   {
@@ -300,30 +298,30 @@ const VENDORED_LIBRARY = /^@deepseek-ai\\/(cosmokit|schemastery)(\\/|$)/
     // paragraph above the invariant that says to rescope it.
     id: 'vendoring-cookbook-tree-comment',
     file: 'docs/cookbook/adding-a-vendored-package.md',
-    find: '  package.json     # from upstream; set "private": true, keep name/exports/type',
-    replace: '  package.json     # from upstream; set "private": true, rescope the name, keep exports/type',
+    find: '  package.json     # from upstream; rescope the name, keep exports/type (publishable release member, no private flag)',
+    replace: '  package.json     # from upstream; set "private": true, rescope the name, keep version/exports/type',
     expect: 1,
   },
   {
     id: 'vendoring-cookbook-tree-comment-zh',
     file: 'docs/cookbook/adding-a-vendored-package.zh.md',
-    find: '  package.json     # from upstream; set "private": true, keep name/exports/type',
-    replace: '  package.json     # from upstream; set "private": true, rescope the name, keep exports/type',
+    find: '  package.json     # from upstream; rescope the name, keep exports/type (publishable release member, no private flag)',
+    replace: '  package.json     # from upstream; set "private": true, rescope the name, keep version/exports/type',
     expect: 1,
   },
   {
     // The checklist told the next vendoring to keep upstream's name.
     id: 'vendoring-cookbook-name-invariant',
     file: 'docs/cookbook/adding-a-vendored-package.md',
-    find: "keep upstream's `name`/`version`/`exports`/`type`",
-    replace: "rescope the `name` ([mapping](../rescope.md)) while keeping upstream's `version`/`exports`/`type`",
+    find: "`package.json` invariants: rescope the `name` ([mapping](../rescope.md)) while keeping upstream's `exports`/`type`, point declaration metadata at `lib/types`, publish `.d.ts` and `.d.ts.map` declaration outputs, and list its cordis deps in `peerDependencies` (matching the upstream manifest). Vendored packages are publishable release members, so they must NOT set `private: true` and must set `publishConfig.access: public`; the `version` field follows the harness release sequence (see [vendor/README.md](../../vendor/README.md)).",
+    replace: "`package.json` invariants: set `private: true`, omit `publishConfig`, rescope the `name` ([mapping](../rescope.md)) while keeping upstream's `version`/`exports`/`type`, point declaration metadata at `lib/types`, include `.d.ts` and `.d.ts.map` declaration outputs in `files`, and list its Cordis dependencies in `peerDependencies` (matching the upstream manifest).",
     expect: 1,
   },
   {
     id: 'vendoring-cookbook-name-invariant-zh',
     file: 'docs/cookbook/adding-a-vendored-package.zh.md',
-    find: '保留上游的 `name`/`version`/`exports`/`type`',
-    replace: '改写 `name` 的 scope（[映射](../rescope.zh.md)），保留上游的 `version`/`exports`/`type`',
+    find: '`package.json` 的不变式：改写 `name` 的 scope（[映射](../rescope.zh.md)），保留上游的 `exports`/`type`；声明元数据指向 `lib/types`；发布 `.d.ts` 与 `.d.ts.map` 声明输出；在 `peerDependencies` 中列出其 Cordis 依赖（与上游 manifest（元数据清单）一致）。vendored 包是可发布的 release member，因此不得设置 `private: true`，且必须设置 `publishConfig.access: public`；`version` 字段跟随 harness 发布序列（见 [vendor/README.md](../../vendor/README.md)）。',
+    replace: '`package.json` 的不变式：设置 `private: true`，省略 `publishConfig`，改写 `name` 的 scope（[映射](../rescope.zh.md)），保留上游的 `version`/`exports`/`type`；声明元数据指向 `lib/types`；在 `files` 中包含 `.d.ts` 与 `.d.ts.map` 声明输出；并在 `peerDependencies` 中列出其 Cordis 依赖（与上游 manifest（元数据清单）一致）。',
     expect: 1,
   },
   {
@@ -409,24 +407,6 @@ const VENDORED_LIBRARY = /^@deepseek-ai\\/(cosmokit|schemastery)(\\/|$)/
     expect: 1,
   },
   {
-    // The framework peer is no longer a registry name, so the rehearsal must install this
-    // repository's vendored copies; cosmokit comes along as cordis's own dependency.
-    id: 'packed-install-vendored-peer',
-    file: 'packages/sandbox/sandbox-local/tests/packed-install.e2e.ts',
-    find: `  'packages/runtime-diagnostics/invariants',
-]`,
-    replace: `  'packages/runtime-diagnostics/invariants',
-  // The framework and the vendored packages the closure declares outright:
-  // rescoped into @deepseek-ai, so the consumer installs this repository's
-  // copies. Schemastery is a hard dependency of three members above, not a
-  // peer, so npm resolves it while installing them.
-  'vendor/cordis',
-  'vendor/cosmokit',
-  'vendor/schemastery',
-]`,
-    expect: 1,
-  },
-  {
     id: 'packed-install-registry-spec',
     file: 'packages/sandbox/sandbox-local/tests/packed-install.e2e.ts',
     find: `    // Peer ranges resolve to the tarballs; Cordis is pinned to their peer range. Do not omit optional
@@ -442,16 +422,18 @@ const VENDORED_LIBRARY = /^@deepseek-ai\\/(cosmokit|schemastery)(\\/|$)/
   {
     id: 'packed-install-module-doc',
     file: 'packages/sandbox/sandbox-local/tests/packed-install.e2e.ts',
-    find: ` * Keyless publish-path rehearsal. It packs the provider, its workspace peers, and the current
- * repository's Landlock entry/platform packages, then installs those exact tarballs in an external
- * plain-Node consumer. The host launcher comes from the exact local tarballs, so no registry copy,
- * tsx, path mapping, or workspace resolution can hide missing files, dependency errors, or lost
- * executable modes.`,
+    find: ` * Keyless publish-path rehearsal. It packs the provider, its workspace peers, the vendored framework
+ * peer, and the current repository's Landlock entry/platform packages, then installs those exact
+ * tarballs in an external plain-Node consumer. The host launcher comes from the exact local tarballs,
+ * so no registry copy, tsx, path mapping, or workspace resolution can hide missing files, dependency
+ * errors, or lost executable modes. npm may still query registry metadata for an incompatible optional platform
+ * package that cannot supply the host launcher.`,
     replace: ` * Keyless packed-workspace rehearsal. It packs the provider, its workspace peers, the vendored framework
  * peer, and the current repository's Landlock entry/platform packages, then installs those exact
  * tarballs in an external plain-Node consumer. The host launcher comes from the exact local tarballs,
  * so no registry copy, tsx, path mapping, or workspace resolution can hide missing files, dependency
- * errors, or lost executable modes.`,
+ * errors, or lost executable modes. npm may still query registry metadata for an incompatible optional platform
+ * package that cannot supply the host launcher.`,
     expect: 1,
   },
   // The manifest table's name column plus the new upstream-name column, one edit per row.
@@ -527,7 +509,7 @@ function rewriteLine(line: string, file: string, all: readonly Pattern[]): strin
  * Markdown splits in two. Every fence is code a reader copies or a
  * configuration they mount, so every fence follows the rename regardless of its
  * info string. Prose follows it only under `docs/`, where a sentence quoting
- * `` `cordis` `` teaches a name this repository no longer resolves; elsewhere
+ * `` `cordis` `` teaches an unresolved package name; elsewhere
  * prose is a record of what was true when it was written, and the same spelling
  * can mean something else entirely — the Python SDK's `cordis` option, or the
  * unvendored `@cordisjs/plugin-http`.

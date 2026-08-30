@@ -25,19 +25,14 @@ name: E2E (real DeepSeek API)
 # The fork/secret model and its public-repo implications are recorded in
 # .agents/notes/implemented/testing/2026-06-19-real-api-e2e-ci.md.
 #
-# Note: scheduled triggers are auto-disabled after 60 days of repo inactivity;
-# push/pull_request/workflow_dispatch act as backstops.
 on:
   workflow_dispatch:
   push:
     branches: [main, master]
   pull_request:
-  schedule:
-    # 00:17 UTC nightly = 08:17 Asia/Shanghai — off the top-of-hour cron stampede.
-    - cron: '17 0 * * *'
 
-# Cancel a superseded PR run (it is on a stale commit); never cancel a
-# push/schedule run — it is already producing the post-merge/nightly signal.
+# Cancel a superseded PR run because it is on a stale commit; never cancel a
+# push run because it is already producing the post-merge signal.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -60,8 +55,9 @@ jobs:
     if: >-
       github.event_name != 'pull_request'
       || !(github.event.pull_request.head.repo.fork || github.event.pull_request.user.login == 'dependabot[bot]')
-    # Bounded file parallelism (DSH_E2E_MAX_WORKERS), 120s/test, retry 2. 45m
-    # still bounds retry storms against a slow API while the happy path fans out.
+    # Profile e2e files can each own several complete dsh subprocess trees, so
+    # four file workers preserve process/PTY headroom. Tests retain 120s/test
+    # and retry 2; 45m still bounds retry storms against a slow API.
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v6
@@ -115,6 +111,6 @@ jobs:
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY_EXTERNAL }}
           DEEPSEEK_BASE_URL: https://api.deepseek.com
-          DSH_E2E_MAX_WORKERS: 14
+          DSH_E2E_MAX_WORKERS: 4
           DSH_EXAMPLE_MODE: lib
         run: pnpm run test:e2e

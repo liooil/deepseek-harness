@@ -1,4 +1,4 @@
-/** Run publint over the exact manifest-declared publication view of every package. */
+/** Run publint over the manifest-declared publication view of every non-private package. */
 
 import {
   globSync,
@@ -29,6 +29,7 @@ interface PackageTarget {
 
 interface PackageManifest {
   name?: string
+  private?: boolean
   files?: unknown
 }
 
@@ -57,6 +58,7 @@ function workspacePackages(): PackageTarget[] {
       const manifest = JSON.parse(readFileSync(absoluteManifestPath, 'utf8')) as PackageManifest
       return { path: dirname(manifestPath), directory: dirname(absoluteManifestPath), manifest }
     })
+    .filter(target => target.manifest.private !== true)
 }
 
 function publintConcurrency(total: number): number {
@@ -177,6 +179,22 @@ function relativeImports(file: string, sourceText: string): RelativeImport[] {
   return imports
 }
 
+/**
+ * publint reads the CommonJS interop preamble inside the prebuilt browser
+ * bundles and reports CJS-written-as-ESM. Node never resolves those files:
+ * `lib/client.js` is evaluated by the page module system as a classic script,
+ * and `lib/worker.js` by `new Worker(url, { type: 'module' })` — both outside
+ * the Node resolution publint models. Exactly that verdict on exactly those
+ * files is suppressed; every other publint error stays fatal.
+ */
+function isBrowserBundleFormatFalsePositive(message: Message): boolean {
+  if (message.code !== 'FILE_INVALID_FORMAT') return false
+  const filePath = (message.args as { actualFilePath?: string }).actualFilePath ?? ''
+  const exportKey = Array.isArray(message.path) ? message.path.join('/') : ''
+  return /(^|\/)lib\/(client|worker)\.js$/.test(filePath)
+    || /(^|\/)\.\/(client|worker)$/.test(exportKey)
+}
+
 async function runPublint(target: PackageTarget): Promise<PublintResult> {
   try {
     const files = publicationFiles(target)
@@ -186,9 +204,10 @@ async function runPublint(target: PackageTarget): Promise<PublintResult> {
       pack: { files },
     })
     const manifest = result.pkg as Record<string, unknown>
-    return result.messages.some(message => message.type === 'error') || closureViolations.length > 0
-      ? { path: target.path, status: 'failed', messages: result.messages, closureViolations, manifest }
-      : { path: target.path, status: 'passed', messages: result.messages, closureViolations, manifest }
+    const messages = result.messages.filter(message => !isBrowserBundleFormatFalsePositive(message))
+    return messages.some(message => message.type === 'error') || closureViolations.length > 0
+      ? { path: target.path, status: 'failed', messages, closureViolations, manifest }
+      : { path: target.path, status: 'passed', messages, closureViolations, manifest }
   } catch (error: unknown) {
     return {
       path: target.path,

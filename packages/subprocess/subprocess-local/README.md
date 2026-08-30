@@ -1,10 +1,16 @@
+---
+description: "The local host provider for the subprocess service: run managed process trees and real terminal sessions on the host machine."
+kind: "package-reference"
+---
+
 # @deepseek-ai/dsh-subprocess-local
 
 English | [中文](README.zh.md)
 
+## Summary
+
 Local Service Provider for the [`@deepseek-ai/dsh-subprocess`](../subprocess/README.md) seam. `LocalSubprocessRuntime` resolves local executables, spawns ordinary detached process trees with explicit stdio, and implements terminal processes through Bun's native `Bun.Terminal` or Node's `node-pty`, plus platform process inspection. It has no config: every disposition, limit, terminal dimension, grace, and directory arrives from the calling capability seams ([`dsh-bash-local`](../../shell/bash-local/README.md), [`dsh-lsp-stdio`](../../lsp/lsp-stdio/README.md), and [`dsh-terminal-bash`](../../terminal/terminal-bash/README.md)).
 
-## Behavior
 
 - **Detached process trees with platform-correct signalling** — POSIX children are spawned `detached` (own process group) and signalled by negative pgid with a direct-child fallback; Windows terminates the tree via `taskkill /PID <pid> /T /F`. `terminate()` — the handle's only termination verb — sends SIGTERM then SIGKILL after the spec's grace (OpenCode's escalation; pipelines and subshells die with the parent) and is a no-op once the tree is gone; `waitForExit()` polls whole-tree liveness so consumer teardown confirms real quiescence. After the leader exits, still-open pipes receive the same bounded drain grace so a surviving descendant cannot hold the outcome open indefinitely. ESRCH is tolerated; daemons that re-parent away from the group can still survive.
 - **Per-stream dispositions** — `'pipe'` hands the raw stream to the caller untouched (protocol framing stays consumer-owned); `'inherit'` passes the parent descriptor through; collect mode keeps the in-memory TAIL beyond its cap (errors and results cluster at the end — pi/OpenCode rationale) while the FULL stream is appended to a private temp file when a spill cap is configured — omitting `spill` keeps only the tail, the diagnostic shape. A stream larger than the spill cap discards its now-incomplete spill and returns only the marked truncated tail; spill fds are sealed at settlement, and a failed final close withholds the path rather than advertising an incomplete file. Spill files are `0600` with random names under a lazily-created `0700` per-process directory.
@@ -15,9 +21,105 @@ Local Service Provider for the [`@deepseek-ai/dsh-subprocess`](../subprocess/REA
 - **Terminate-and-join disposal** — the service retains live handles so its own disposal can escalate every running tree and await its exit; quiescent and spawn-failed handles leave the live set after whole-tree or terminal-session cleanup finishes.
 - **Synchronous host-exit finalization** — while the service effect is active, the JavaScript host's `exit` listener force-terminates every ordinary tree and observable terminal session still in the same live sets. The local-only operations send POSIX SIGKILL to the managed group, run Windows `taskkill /T /F`, and synchronously signal captured/current terminal identities around the PTY root kill; they create no promise or timer, preserve the host's exit code and diagnostic, contain each target's failure, and do not claim quiescence. Normal disposal keeps the awaited graceful path above. See the [host-exit cleanup decision](../../../.agents/notes/implemented/bug-fix/2026-08-11-synchronous-subprocess-exit-cleanup.md).
 
+## Table of Contents
+
+- [Use this package](#use-this-package)
+- [Understand the implementation](#understand-the-implementation)
+- [Further Exploration](#further-exploration)
+- [Model Experience](#model-experience)
+- [Known Limitations and Deferred Work](#known-limitations-and-deferred-work)
+- [Dev Note](#dev-note)
+
+-----
+
+<a id="use-this-package"></a>
+## Use this package
+
+Mount the provider beside its consumers and start processes exactly as the subprocess service specifies; this package decides only how those processes run on the host.
+
+### Mounting the provider
+
+Load the provider in the same composition as its consumers. It has no config fields: every choice arrives on the spawn request, so deployment-varying decisions stay with the caller's configuration.
+
+```yaml
+- name: '@deepseek-ai/dsh-subprocess-local'
+- name: '@deepseek-ai/dsh-bash-local'
+```
+
+### Resolving executables
+
+Absolute executable paths are verified; bare names resolve against the scrubbed PATH with platform-aware executable extensions (`.COM`/`.EXE`/`.BAT`/`.CMD` on Windows). Relative paths containing separators are rejected — provide an absolute path or a bare PATH name — and relative PATH entries resolve from the host process cwd.
+
+### Collecting output
+
+Collect mode keeps the last `maxBytes` of a stream in memory — errors and final results cluster at the end — and, when a `spill` cap is configured, appends the complete stream to a private file under a per-process directory in the OS temp dir (a `0700` directory, `0600` random-named files). A stream larger than the spill cap discards its incomplete spill and returns only the marked truncated tail. Reads are offset-based and non-consuming, so background and batch readers coexist before and after exit.
+
+### Running terminal sessions
+
+`spawnTerminal` allocates a real PTY and bridges UTF-8 text; you can inspect and signal the current foreground process group and await a `terminate()` that settles every session member the provider can still observe. On Linux, an exact input wait requires a foreground thread whose fd 0 identifies the shell's controlling terminal and whose current syscall waits on that fd. If the kernel denies the syscall probe, the provider reports no exact wait and leaves the higher PTY backend to its idle inference; process sleep state is not evidence. On Windows, SIGINT is delivered as a Ctrl-C input write, SIGTSTP and SIGHUP are unsupported, and teardown verifies the shell's termination through the process table because an externally killed shell may never fire the PTY exit notification.
+
+### Shutdown behavior
+
+Normal disposal terminates every running tree and terminal and awaits their exit. During a JavaScript-observable host exit — direct `process.exit()`, default uncaught exceptions, default unhandled rejections — a synchronous finalization force-terminates everything still owned (SIGKILL to the group, `taskkill /T /F` on Windows) without creating promises or timers. Unhandled `SIGTERM`/`SIGINT`/`SIGHUP`, `SIGKILL`, fatal OOM, native crashes, and power loss need an external supervisor.
+
+### What can go wrong
+
+An executable that cannot be resolved fails loud with a stable error; a spawn that never starts rejects `done`. A read past the retained tail is `lossy` and points at the spill file when one exists. A daemonized descendant that leaves the tree or terminal session can outlive cleanup — see the limitations below.
+
+-----
+
+<a id="understand-the-implementation"></a>
+## Understand the implementation
+
+<details>
+<summary>Implementation internals — click to expand</summary>
+
+This section explains the design decisions behind the provider and points at the code that realizes them; the observable behavior is covered in [Use this package](#use-this-package).
+
+### Design concept
+
+The provider treats the process tree as the unit of lifetime. POSIX children spawn detached (their own process group) so the whole tree is signalled by negative group id with a direct-child fallback; Windows terminates by root pid through `taskkill /T`. Signalling, escalation, and teardown guard on tree liveness rather than direct-child settlement, so a TERM-trapping helper cannot outlive the handle unnoticed.
+
+### Source map
+
+| File | Role |
+|---|---|
+| [`src/index.ts`](src/index.ts) | Service wiring: live-handle sets, disposal, host-exit finalization, executable lookup |
+| [`src/spawn.ts`](src/spawn.ts) | Process plumbing: detached spawn, tail-keep collection, spill files, escalation, tree-exit observer |
+| [`src/terminal.ts`](src/terminal.ts) | `node-pty` terminal handle: foreground inspection, session cleanup, Windows teardown |
+| [`src/process-inspector.ts`](src/process-inspector.ts) | POSIX process-tree and session inspection |
+| [`src/windows-inspector.ts`](src/windows-inspector.ts) | Windows Toolhelp32 process-table inspection via koffi |
+| [`src/invariant.ts`](src/invariant.ts) | Invariant companion (no runtime invariant; the seam owns the contract) |
+
+### Main flow
+
+A spawn builds the scrubbed child environment, starts the detached process, attaches collectors to the collected streams, and returns a handle. `done` settles at process close after a bounded pipe-drain grace, so a surviving descendant that inherited a pipe cannot hold the outcome open indefinitely; the escalation timer survives direct-child settlement so SIGKILL still reaches tree survivors. Terminal cleanup sweeps descendants by exact identity, stops the shell, re-sweeps, and verifies absence through the process table.
+
+### Safety invariants
+
+Spill files are opened `0600` with `O_EXCL` and random names under a `0700` per-process directory, defeating symlink planting in shared temp dirs; a failed final close withholds the spill path. Process identities carry start times, so cleanup never follows PID reuse. Host-exit finalization creates no promises or timers, preserves the host exit code and diagnostic, contains each target's failure, and does not claim quiescence.
+
+</details>
+
+-----
+
+<a id="further-exploration"></a>
+## Further Exploration
+
+Read these pages when the provider-level contract is not enough. They move from the exhaustive type reference to the abstract contract and the decisions behind the host mechanics.
+
+- [Subprocess subsystem](../../../docs/subsystems/subprocess.md) — spawn specs, output readers, outcomes, and the `DSH_*` environment in full.
+- [dsh-subprocess](../subprocess/README.md) — the abstract contract this provider implements.
+- [dsh-bash-local](../../shell/bash-local/README.md) — the largest consumer and the concrete stdio shapes it asks for.
+- [Subprocess seam Agent Note](../../../.agents/notes/implemented/architecture/2026-07-26-subprocess-seam.md) — why the process half became its own seam.
+- [Synchronous subprocess exit cleanup](../../../.agents/notes/implemented/bug-fix/2026-08-11-synchronous-subprocess-exit-cleanup.md) — the host-exit finalization decision and its failure modes.
+
+-----
+
+<a id="model-experience"></a>
 ## Model Experience
 
-Indirectly, through Consumers (today the bash executor family behind `dsh-tool-bash`), which own all model-facing rendering of process output and lifecycle.
+Indirectly, through consumer seams such as the bash executor family, which own all model-facing rendering of spawned process output and lifecycle.
 
 #### KV Cache effect
 
@@ -32,4 +134,13 @@ No direct invalidation; the named consumers own any request-prefix changes.
 - **The credential scrub is a name heuristic** — `*KEY*`/`*PASSWORD*`/`*SECRET*`/`*TOKEN*` only; differently-named secrets (e.g. `*PASSPHRASE*`) pass through, and a whitelist for over-scrubbed vars is noted future work.
 - **Completed spill files are not deleted** — bounded full-output recovery files (and the private per-process spill dir) accumulate under the OS tmpdir until something external cleans them; oversize incomplete spills are discarded and deletion is attempted immediately, but a cleanup failure can leave a bounded file behind.
 
-The raw process handling lives in `src/spawn.ts`; `src/index.ts` is the service wiring.
+
+<a id="dev-note"></a>
+### Dev Note
+
+<details>
+<summary>Working context for maintainers — click to expand</summary>
+
+None.
+
+</details>
