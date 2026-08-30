@@ -58,14 +58,14 @@ describe.skipIf(!packable)('sandbox-local: packed-tarball distribution (publish-
     workDir = mkdtempSync(join(tmpdir(), 'dsh-packed-work-'))
 
     const nativePackDest = join(packDest, 'native')
-    const nativePack = spawnSync('node', ['./scripts/pack-release.mjs', nativePackDest, '--current-platform-only'], {
+    const nativePack = spawnSync('node', ['./scripts/pack-workspace.mjs', nativePackDest, '--current-platform-only'], {
       cwd: nativeDir,
       encoding: 'utf8',
       timeout: 120_000,
     })
     expect(nativePack.status, `native pack failed:\n${nativePack.stdout}\n${nativePack.stderr}`).toBe(0)
 
-    const nativeTarballs = readFileSync(join(nativePackDest, 'publish-order.txt'), 'utf8')
+    const nativeTarballs = readFileSync(join(nativePackDest, 'package-order.txt'), 'utf8')
       .trim()
       .split('\n')
       .map(tarball => join(nativePackDest, tarball))

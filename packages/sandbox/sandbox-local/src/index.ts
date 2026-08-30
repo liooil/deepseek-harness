@@ -136,6 +136,12 @@ export interface SandboxInternals {
   windowsAclRunnerEntry?: string
   /** Replaces the functional windows-acl probe (the win32 chain's sole rung — only consulted if that chain ever grows). */
   probeWindowsAcl?: () => boolean
+  /** Replaces deterministic workspace capability derivation for native-boundary tests. */
+  workspaceWriteSid?: (workspaceRoot: string) => string
+  /** Replaces private temp capability derivation for native-boundary tests. */
+  tempWriteSid?: (tempDir: string) => string
+  /** Replaces native write-grant creation without loading Win32 FFI on another host. */
+  createAclWriteGrant?: (writeSid: string) => AclWriteGrant
   /** Replaces the private-temp-directory removal at provider dispose (a throwing fake exercises the cleanup-failure path). */
   rmTempDir?: (path: string) => void
 }
@@ -155,6 +161,7 @@ function createAclWriteGrant(writeSid: string): AclWriteGrant {
   const runtime = createRequire(import.meta.url)(packageName) as { AclWriteGrant: typeof AclWriteGrant }
   return runtime.AclWriteGrant.create(writeSid)
 }
+
 
 /**
  * The runner chain per platform — selection is BY PLATFORM first, probes
@@ -380,7 +387,7 @@ export class LocalSandboxProvider extends SandboxProvider {
       '--workspace', policy.workspaceRoot,
       '--temp', temp.dir,
       '--mode', policy.mode,
-      '--write-sid', workspaceWriteSid(policy.workspaceRoot),
+      '--write-sid', this.internals.workspaceWriteSid?.(policy.workspaceRoot) ?? workspaceWriteSid(policy.workspaceRoot),
       '--temp-write-sid', temp.writeSid,
     ]
   }
@@ -400,9 +407,9 @@ export class LocalSandboxProvider extends SandboxProvider {
    */
   private materializeAclGrant(sessionId: SessionId, workspaceRoot: string): AclTempCapability {
     assertTempRootOutsideWorkspace(workspaceRoot, tmpdir())
-    const writeSid = workspaceWriteSid(workspaceRoot)
+    const writeSid = this.internals.workspaceWriteSid?.(workspaceRoot) ?? workspaceWriteSid(workspaceRoot)
     if (!this.workspaceGrants.has(workspaceRoot)) {
-      const grant = createAclWriteGrant(writeSid)
+      const grant = this.internals.createAclWriteGrant?.(writeSid) ?? createAclWriteGrant(writeSid)
       try {
         grant.add(workspaceRoot, true)
       } catch (error) {
@@ -422,10 +429,10 @@ export class LocalSandboxProvider extends SandboxProvider {
     const existing = this.tempCapabilities.get(key)
     if (existing !== undefined) return existing
     const tempDir = mkdtempSync(join(tmpdir(), 'dsh-'))
-    const tempSid = tempWriteSid(tempDir)
+    const tempSid = this.internals.tempWriteSid?.(tempDir) ?? tempWriteSid(tempDir)
     let grant: AclWriteGrant | undefined
     try {
-      grant = createAclWriteGrant(tempSid)
+      grant = this.internals.createAclWriteGrant?.(tempSid) ?? createAclWriteGrant(tempSid)
       grant.add(tempDir)
     } catch (error) {
       const cleanupFailures: unknown[] = []

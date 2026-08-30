@@ -716,7 +716,10 @@ function formatNestedErrors(error: unknown, seen = new Set<unknown>()): string[]
   if (seen.has(error)) return []
   seen.add(error)
   if (error instanceof AggregateError) {
-    return (error.errors as unknown[]).flatMap(item => formatNestedErrors(item, seen))
+    return [
+      error.stack ?? error.message,
+      ...(error.errors as unknown[]).flatMap(item => item instanceof Error ? formatNestedErrors(item, seen) : [String(item)]),
+    ]
   }
   if (!(error instanceof Error)) return []
   if (error.cause !== undefined) return formatNestedErrors(error.cause, seen)

@@ -12,6 +12,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import type { SandboxPolicy } from '@deepseek-ai/dsh-sandbox'
 import { SessionId } from '@deepseek-ai/dsh-session'
+import { AclWriteGrant } from '@deepseek-ai/dsh-sandbox-windows-acl'
 import { LocalSandboxProvider } from '@deepseek-ai/dsh-sandbox-local'
 
 /** Cross-file state shared with the vi.mock factory (hoisting contract). */
@@ -69,7 +70,13 @@ async function setup() {
   const ctx = new Context()
   const fiber = await ctx.plugin(LocalSandboxProvider, {})
   const sandbox = ctx.sandbox as LocalSandboxProvider
-  sandbox.internals = { platform: 'win32', windowsAclRunnerArgs: ['node', 'windows-acl-runner.js'] }
+  sandbox.internals = {
+    platform: 'win32',
+    windowsAclRunnerArgs: ['node', 'windows-acl-runner.js'],
+    workspaceWriteSid: () => WORKSPACE_SID,
+    tempWriteSid: path => `TEMP:${path}`,
+    createAclWriteGrant: writeSid => AclWriteGrant.create(writeSid),
+  }
   return { ctx, sandbox, fiber }
 }
 

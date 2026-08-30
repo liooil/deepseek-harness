@@ -20,7 +20,7 @@
  */
 
 import { existsSync } from 'node:fs'
-import { isAbsolute, relative, sep } from 'node:path'
+import { isAbsolute, join, parse, relative, sep } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import { HarnessError } from '@deepseek-ai/dsh-llm'
 import { ItemRetainer, TextRetainer } from '@deepseek-ai/dsh-output-retention'
@@ -181,7 +181,10 @@ export function configureRipgrepPath(path: string): void {
 export function resolveRgPath(): Promise<string> {
   rgPathPromise ??= Promise.resolve().then(async () => {
     if (packagedRgPath !== undefined) return packagedRgPath
-    const executableSidecar = `${process.execPath}-rg`
+    const executable = parse(process.execPath)
+    const executableSidecar = process.platform === 'win32'
+      ? join(executable.dir, `${executable.name}-rg.exe`)
+      : `${process.execPath}-rg`
     if ('pkg' in process && existsSync(executableSidecar)) return executableSidecar
     return (await import('@vscode/ripgrep')).rgPath
   })
