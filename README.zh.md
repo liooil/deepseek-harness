@@ -1,10 +1,10 @@
-# DeepSeek Harness
+# DeepSeek Harness Desktop
 
 [English](README.md) | 中文
 
-DeepSeek Harness（`dsh`）是由 [DeepSeek AI](https://deepseek.com) 开发的开源 agent harness（智能体框架）。
+DeepSeek Harness Desktop 是 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 的非官方桌面发行版；上游开源 agent harness（智能体框架）由 [DeepSeek AI](https://deepseek.com) 开发。
 
-它构建于**一切皆插件**的架构之上，由 [Cordis](https://github.com/cordiverse/cordis) 驱动，其设计参见论文 [_A Programming Paradigm for Spatiotemporal Composability_](https://arxiv.org/abs/2608.25512)。
+本下游仓库将上游基于 Cordis 的插件化应用打包为原生 `dsh-desktop` 可执行文件。产品开发与通用项目文档仍归上游仓库所有；本仓库负责桌面兼容性、验证与发布。
 
 文档：[https://deepseek-harness.github.io/deepseek-harness/](https://deepseek-harness.github.io/deepseek-harness/)
 
@@ -20,7 +20,7 @@ DeepSeek Harness 处于 _开发者预览_ 阶段，正在快速迭代。**未来
 
 ### 运行桌面二进制
 
-从 [GitHub Releases](https://github.com/liooil/deepseek-harness/releases) 下载匹配的 `dsh-desktop-{linux,windows,macos}-{x64,arm64}` 可执行文件。Release 可执行文件包含服务端和 Web UI，不需要安装 Node.js、Bun 或 npm。
+从 [GitHub Releases](https://github.com/liooil/deepseek-harness-desktop/releases) 下载匹配的 `dsh-desktop-{linux,windows,macos}-{x64,arm64}` 可执行文件。Release 可执行文件包含服务端和 Web UI，不需要安装 Node.js、Bun 或 npm。
 
 ```sh
 chmod +x ./dsh-desktop-linux-x64
@@ -36,8 +36,8 @@ chmod +x ./dsh-desktop-linux-x64
 如需从仓库源码运行：
 
 ```sh
-git clone https://github.com/liooil/deepseek-harness.git
-cd deepseek-harness
+git clone https://github.com/liooil/deepseek-harness-desktop.git
+cd deepseek-harness-desktop
 pnpm install
 pnpm run build
 pnpm dsh web

@@ -1,0 +1,50 @@
+name: Prepare upstream sync
+
+on:
+  workflow_dispatch:
+    inputs:
+      upstream_ref:
+        description: Upstream branch to merge into a validation branch
+        required: true
+        type: string
+        default: master
+
+concurrency:
+  group: upstream-sync
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    name: merge upstream into validation branch
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: master
+          fetch-depth: 0
+
+      - name: Prepare merge-forward branch
+        env:
+          UPSTREAM_REF: ${{ inputs.upstream_ref }}
+          SYNC_BRANCH: sync/upstream-${{ github.run_id }}-${{ github.run_attempt }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git check-ref-format "refs/heads/$UPSTREAM_REF"
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git remote add upstream-sync https://github.com/deepseek-ai/deepseek-harness.git
+          git fetch --no-tags upstream-sync \
+            "refs/heads/$UPSTREAM_REF:refs/remotes/upstream-sync/$UPSTREAM_REF"
+          git switch -c "$SYNC_BRANCH"
+          git merge --no-edit "refs/remotes/upstream-sync/$UPSTREAM_REF"
+          git push origin "HEAD:refs/heads/$SYNC_BRANCH"
+          {
+            echo "### Upstream sync branch"
+            echo
+            echo "Pushed \`$SYNC_BRANCH\`. Desktop CI validates this branch; update master only after it passes."
+          } >> "$GITHUB_STEP_SUMMARY"

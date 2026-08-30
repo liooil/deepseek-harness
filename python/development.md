@@ -60,7 +60,7 @@ Repository contributors can select either development route; both execute the no
 
 ## Build local wheel artifacts
 
-The root `package.json` version is authoritative for both local Python wheel artifacts. The staging script injects that version into both wheels and pins the SDK to the same `deepseek-harness-runtime-bin` version. This fork does not publish either Python distribution to PyPI; end users should use the desktop binary from the [GitHub Releases](https://github.com/liooil/deepseek-harness/releases) page.
+The root `package.json` version is authoritative for both local Python wheel artifacts. The staging script injects that version into both wheels and pins the SDK to the same `deepseek-harness-runtime-bin` version. This fork does not publish either Python distribution to PyPI; end users should use the desktop binary from the [GitHub Releases](https://github.com/liooil/deepseek-harness-desktop/releases) page.
 
 Build the pure SDK wheel once and one runtime wheel on each native platform:
 

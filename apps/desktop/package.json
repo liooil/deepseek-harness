@@ -5,7 +5,7 @@
   "private": true,
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/deepseek-ai/deepseek-harness.git",
+    "url": "git+https://github.com/liooil/deepseek-harness-desktop.git",
     "directory": "apps/desktop"
   },
   "type": "module",

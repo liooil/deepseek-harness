@@ -16,10 +16,10 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/liooil/deepseek-harness"
-Documentation = "https://github.com/liooil/deepseek-harness/blob/master/docs/user/guide/python-sdk.md"
-Issues = "https://github.com/liooil/deepseek-harness/issues"
-Source = "https://github.com/liooil/deepseek-harness"
+Homepage = "https://github.com/liooil/deepseek-harness-desktop"
+Documentation = "https://github.com/liooil/deepseek-harness-desktop/blob/master/docs/user/guide/python-sdk.md"
+Issues = "https://github.com/liooil/deepseek-harness-desktop/issues"
+Source = "https://github.com/liooil/deepseek-harness-desktop"
 
 [dependency-groups]
 test = ["pytest>=8.0"]

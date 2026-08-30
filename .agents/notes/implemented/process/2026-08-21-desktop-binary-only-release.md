@@ -16,6 +16,8 @@ The only public publication path is `.github/workflows/desktop-release.yml`. Eac
 
 README and contributor documentation direct end users to the desktop GitHub Release. Python SDK and runtime wheels are explicitly described as internal artifacts, while local and CI packed-install checks continue to prove the source and binary payloads that support the desktop build.
 
+The public repository is named `deepseek-harness-desktop` so its downstream distribution role cannot be confused with the upstream source repository. Its default CI surface is desktop-specific: static repository gates, native desktop smoke tests, sandbox portability, and the six-target release. Upstream package publication, organization runner drills, preview deployment, issue automation, Python executable publication, and automatic real-API runs are not fork CI responsibilities. Real-API E2E remains manually dispatchable when a maintainer provides credentials.
+
 ## Alternatives considered
 
 **Keep publishing the workspace packages privately or publicly.** Rejected because the fork has no package-consumer promise; private publication still requires registry credentials and release recovery, while public publication creates an API surface that the desktop executable already contains.

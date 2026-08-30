@@ -60,7 +60,7 @@ with DeepSeekHarness(dsh_home="/absolute/path/to/test-dsh-home") as harness:
 
 ## 构建本地 wheel 产物
 
-根目录 `package.json` 的版本是两个本地 Python wheel 产物的权威版本。暂存脚本会将该版本注入两个 wheel 包，并将 SDK 固定到同版本的 `deepseek-harness-runtime-bin`。此 fork 不会将这两个 Python 分发包发布到 PyPI；最终用户应使用 [GitHub Releases](https://github.com/liooil/deepseek-harness/releases) 页面上的桌面二进制。
+根目录 `package.json` 的版本是两个本地 Python wheel 产物的权威版本。暂存脚本会将该版本注入两个 wheel 包，并将 SDK 固定到同版本的 `deepseek-harness-runtime-bin`。此 fork 不会将这两个 Python 分发包发布到 PyPI；最终用户应使用 [GitHub Releases](https://github.com/liooil/deepseek-harness-desktop/releases) 页面上的桌面二进制。
 
 纯 SDK wheel 包只需构建一次；每个原生平台分别构建一个运行时 wheel 包：
 

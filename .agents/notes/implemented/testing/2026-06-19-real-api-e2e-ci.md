@@ -8,40 +8,23 @@ English | [中文](2026-06-19-real-api-e2e-ci.zh.md)
 
 The harness leans hard on real-API tests by policy: [docs/testing.md](../../../../docs/testing.md) argues that a no-key suite proves the plumbing but not the product, and the [ACP inject postmortem](../../../../docs/postmortem/0001-acp-default-export-drops-inject.md) is the standing proof — 178 keyless tests stayed green while a real ACP client session crashed instantly. The real-API e2e suite (`pnpm run test:e2e`, the `*.e2e.ts` files) exists precisely to close that gap: it drives the agent against the live DeepSeek API — real model calls, real bash tools, multi-turn, resume, ACP-over-stdio.
 
-The default gate ([.github/workflows/ci.yml](../../../../.github/workflows/ci.yml)) is deliberately keyless: it carries no secret and runs for forks. `test:e2e` self-skips without a key (`describe.skipIf(!process.env.DEEPSEEK_API_KEY)`), so adding it there would report green without exercising the real suite. A separate secret-bearing workflow is required to make real-API coverage a merge signal.
+The default [Desktop CI workflow](../../../../.github/workflows/desktop-ci.yml) is deliberately keyless: it carries no secret and runs for pull requests and upstream-sync branches. `test:e2e` self-skips without a key (`describe.skipIf(!process.env.DEEPSEEK_API_KEY)`), so adding it there would report green without exercising the real suite. A separate secret-bearing workflow is required for explicit real-API validation.
 
 ## Decision
 
-A dedicated workflow, [.github/workflows/e2e.yml](../../../../.github/workflows/e2e.yml), separate from ci.yml, runs only `pnpm run test:e2e` against the external API using a repo secret, on trusted events, with a preflight that converts a missing secret into a loud failure instead of a false green. The keyless workflow remains separate so forkable quality gates and secret-consuming real-API gates keep different trigger and credential policies.
+A dedicated workflow, [.github/workflows/e2e.yml](../../../../.github/workflows/e2e.yml), runs only `pnpm run test:e2e` against the external API using a repository secret. It is manual-only: Desktop CI remains keyless and deterministic, while a maintainer explicitly opts into API quota, external availability, and credential use when that signal is needed.
 
-### A separate workflow, not a job in ci.yml
+### A separate workflow, not a Desktop CI job
 
-ci.yml's value is that it is keyless, forkable, and always-green: any contributor (including an outside fork) gets a complete keyless signal with no secret in the blast radius. Adding a secret-consuming job there would couple that always-green gate to credential availability and a different trigger policy. Keeping the secret-bearing work in its own file isolates the secret, trigger, and concurrency policy, and preserves ci.yml's property for forks. Different lifecycles → different files.
+Desktop CI must stay runnable on every pull request and upstream-sync branch without credentials. Adding a secret-consuming job would couple the required desktop signal to credential availability and an external service. Keeping the real-API work in its own file isolates its secret, trigger, concurrency, and operational cost. Different lifecycles use different workflows.
 
-### Cost is not the constraint; reliability is
+### Trigger: explicit dispatch only
 
-Internal inference cost is not the limiting constraint, so the workflow optimizes for coverage and signal. It runs every matching `*.e2e.ts` file on multiple triggers and every trusted PR, implementing the [docs/testing.md](../../../../docs/testing.md) with-key policy.
-
-### Triggers: trusted events only
-
-`workflow_dispatch` + `push` to `main`/`master` + nightly `schedule` (`17 0 * * *`, 08:17 Asia/Shanghai) + `pull_request`. Push gives a post-merge signal; schedule catches external-API drift; dispatch is the manual escape hatch; and trusted pull requests get a pre-merge gate. That pre-merge signal deliberately accepts the larger key-exposure surface described under § Security.
-
-### The untrusted-PR gate
-
-GitHub withholds repo secrets from two kinds of PR: those from **forks**, and **Dependabot** PRs (same-repo branch, so `head.repo.fork == false`, but secrets are still withheld). A job-level `if:` skips the whole job for both:
-
-```
-github.event_name != 'pull_request'
-  || !(github.event.pull_request.head.repo.fork || github.event.pull_request.user.login == 'dependabot[bot]')
-```
-
-The Dependabot clause keys on the PR **author** (`pull_request.user.login`), not `github.actor` (the run trigger): a maintainer who reopens or re-runs a Dependabot PR would make `github.actor` a human while the PR is still keyless, and an author-based test stays correct across that. A job skipped by a **job-level** `if:` reports as a *successful* check (unlike a workflow/trigger-level skip, which stays pending), so this workflow is safe to mark as a required status check if desired — a fork/Dependabot PR's skipped-but-green check does not block the merge.
-
-The gate is a *clean-skip nicety*, not the secret's security boundary (see § Security — the boundary is GitHub's own fork-secret withholding under `pull_request`). Without the gate, forks still could not read the key; they would just hit a confusing preflight hard-fail and waste compute.
+`workflow_dispatch` is the sole trigger. Push, pull-request, and scheduled events do not spend quota or turn an absent secret into a routine red build. A maintainer dispatches the workflow when provider behavior needs validation and can inspect that run independently from the keyless desktop verdict.
 
 ### Preflight: fail loud, never false-green
 
-Because the job only runs on trusted events where the secret is expected, the preflight is an unconditional presence check: empty key → `exit 1` with a `::error::` annotation naming the secret to configure. This is the crux that makes a self-skipping suite safe to gate on. Without it, a deleted/renamed/misconfigured secret would make `test:e2e` skip every real suite and report all-green — a silent regression of the entire safety net. The guard turns "secret missing" from an invisible false pass into a visible failure. (Its correctness was verified live: the run before the secret existed failed at exactly this step.)
+The e2e suite self-skips without a key, so a dispatched run performs an unconditional presence check: an empty key exits with a `::error::` annotation naming `DEEPSEEK_API_KEY_EXTERNAL`. This converts a missing or misconfigured credential into a visible failure instead of an all-skipped false pass.
 
 ### Secret mapping and hygiene
 

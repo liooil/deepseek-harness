@@ -1,10 +1,10 @@
-# DeepSeek Harness
+# DeepSeek Harness Desktop
 
 English | [中文](README.zh.md)
 
-DeepSeek Harness (`dsh`) is an open-source agent harness developed by [DeepSeek AI](https://deepseek.com).
+DeepSeek Harness Desktop is an unofficial desktop distribution of [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness), the open-source agent harness developed by [DeepSeek AI](https://deepseek.com).
 
-It is built on an **everything-is-a-plugin** architecture and powered by [Cordis](https://github.com/cordiverse/cordis), whose design is described in [_A Programming Paradigm for Spatiotemporal Composability_](https://arxiv.org/abs/2608.25512).
+This downstream repository packages the upstream plugin-based Cordis application as native `dsh-desktop` executables. Product development and general project documentation remain upstream; this repository owns desktop compatibility, validation, and releases.
 
 Documentation: [https://deepseek-harness.github.io/deepseek-harness/](https://deepseek-harness.github.io/deepseek-harness/)
 
@@ -18,7 +18,7 @@ Review the [safety notice](SAFETY.md) before running the project.
 
 ### Run the desktop binary
 
-Download the matching `dsh-desktop-{linux,windows,macos}-{x64,arm64}` executable from [GitHub Releases](https://github.com/liooil/deepseek-harness/releases). Release executables include the server and Web UI and do not require Node.js, Bun, or npm.
+Download the matching `dsh-desktop-{linux,windows,macos}-{x64,arm64}` executable from [GitHub Releases](https://github.com/liooil/deepseek-harness-desktop/releases). Release executables include the server and Web UI and do not require Node.js, Bun, or npm.
 
 ```sh
 chmod +x ./dsh-desktop-linux-x64
@@ -32,8 +32,8 @@ On Windows, run the `.exe` asset directly. Linux webview mode requires WebKit2GT
 To run from a repository checkout:
 
 ```sh
-git clone https://github.com/liooil/deepseek-harness.git
-cd deepseek-harness
+git clone https://github.com/liooil/deepseek-harness-desktop.git
+cd deepseek-harness-desktop
 pnpm install
 pnpm run build
 pnpm dsh web

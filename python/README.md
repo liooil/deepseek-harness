@@ -17,4 +17,4 @@ The SDK starts the matching bundled `dsh --profile sdk` runtime unless the calle
 
 ## Contributor workflows
 
-This fork does not publish these packages to PyPI. The [Python contributor workflows](development.md) cover building runtime artifacts, validating the packages, source-mode development, and local wheel artifacts. End users should use the desktop binary from the [GitHub Releases](https://github.com/liooil/deepseek-harness/releases) page.
+This fork does not publish these packages to PyPI. The [Python contributor workflows](development.md) cover building runtime artifacts, validating the packages, source-mode development, and local wheel artifacts. End users should use the desktop binary from the [GitHub Releases](https://github.com/liooil/deepseek-harness-desktop/releases) page.

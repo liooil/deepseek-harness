@@ -5,7 +5,7 @@ English | [中文](README.zh.md)
 Python subprocess SDK for driving DeepSeek Harness over JSON-RPC stdio. This
 fork does not publish the SDK or its runtime wheels to PyPI; they are internal
 development and CI artifacts. End users should download the matching desktop
-executable from the [GitHub Releases](https://github.com/liooil/deepseek-harness/releases)
+executable from the [GitHub Releases](https://github.com/liooil/deepseek-harness-desktop/releases)
 page. The runtime inherits normal DeepSeek Harness environment variables such
 as `DEEPSEEK_BASE_URL` and `DEEPSEEK_API_KEY`, so local callers can use real
 model endpoints directly or point those variables at a local proxy.
@@ -68,13 +68,13 @@ with DeepSeekHarness(
 
 `profile` may select another existing profile, but that composition must retain `@deepseek-ai/dsh-sdk-app` or another `@deepseek-ai/dsh-sdk-jsonrpc-server` row. Misconfiguration fails during CLI boot or SDK initialization; there is no complete-config fallback. `dsh_bin` may select another `dsh` executable while preserving the same profile grammar. Arbitrary argv replacement remains an internal fake-runtime test adapter, not public API.
 
-The [Python SDK tutorial](https://github.com/liooil/deepseek-harness/blob/master/docs/user/guide/python-sdk.md) provides an ordered local-build and first-run path without the Web UI. The [`jsonrpc-agent` example](https://github.com/liooil/deepseek-harness/blob/master/examples/jsonrpc-agent/README.md) owns the complete standalone Cordis file used there.
+The [Python SDK tutorial](https://github.com/liooil/deepseek-harness-desktop/blob/master/docs/user/guide/python-sdk.md) provides an ordered local-build and first-run path without the Web UI. The [`jsonrpc-agent` example](https://github.com/liooil/deepseek-harness-desktop/blob/master/examples/jsonrpc-agent/README.md) owns the complete standalone Cordis file used there.
 
 The shipped `sdk-minimal` profile is a standalone explicit tree rather than an overlay on `dsh-base`. Select it with `profile="sdk-minimal"`; the ordinary `model` argument is the sole runtime model selection, including for model ids outside the adapter's advisory catalog. It provides persistent Bash, the string-replace editor, local execution, and JSONL sessions; settings, managed credentials, telemetry, Web tools, and the full default tool roster remain available through the separate full `sdk` and `web` profiles.
 
 ## Results and notifications
 
-The same behavior can be selected for the runtime subprocess with `DSH_CORDIS_CONFIG`. The injection lives in `HarnessClient.start()`, so the low-level client's default launch gets it too: when the launch resolves to the bundled runtime and neither `cordis` nor a non-empty `DSH_CORDIS_CONFIG` is set (the runtime treats an empty value as absent, and so does the injection check), the bundled default configuration is used; an explicit `runtime_bin`, `bridge_bin`, or `launch_args_override` disables the injection entirely. See the [sdk-runtime README](https://github.com/liooil/deepseek-harness/blob/master/python/sdk-runtime/README.md) for the runtime carriers (production exe vs dev-only node closure) and how to obtain them.
+The same behavior can be selected for the runtime subprocess with `DSH_CORDIS_CONFIG`. The injection lives in `HarnessClient.start()`, so the low-level client's default launch gets it too: when the launch resolves to the bundled runtime and neither `cordis` nor a non-empty `DSH_CORDIS_CONFIG` is set (the runtime treats an empty value as absent, and so does the injection check), the bundled default configuration is used; an explicit `runtime_bin`, `bridge_bin`, or `launch_args_override` disables the injection entirely. See the [sdk-runtime README](https://github.com/liooil/deepseek-harness-desktop/blob/master/python/sdk-runtime/README.md) for the runtime carriers (production exe vs dev-only node closure) and how to obtain them.
 
 `HarnessClient` retains discovered subagent ancestry for the runtime process lifetime. During `Session.run()`, `RunResult.notifications` and `on_notification` receive the root session and known descendants in wire order. `RunResult.events` contains root-session events only, so descendant output cannot replace the root response. The low-level `session_prompt()` returns the queued message id immediately; callers that bypass `Session.run()` own the later activity boundary.
 

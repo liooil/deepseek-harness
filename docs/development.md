@@ -120,7 +120,7 @@ Contributors can opt into the comprehensive local gate set with `pnpm run check:
 
 ### CI gates
 
-The keyless [CI workflow](../.github/workflows/ci.yml) groups independent gates into broad lanes and runs a smaller compatibility signal across supported Node versions. Artifact consumers wait for one build within their lane. The separate real-API workflow runs `pnpm run test:e2e` with its configured worker bound. See [scripts/run-gates.ts](../scripts/run-gates.ts) and the workflow files for the current gate and job inventory.
+The keyless [Desktop CI workflow](../.github/workflows/desktop-ci.yml) runs repository policy, type, hygiene, documentation, and desktop integration checks, then builds and smokes Linux x64 on every validated ref. Master pushes additionally build and smoke Windows x64 and macOS arm64. The separate [Sandbox workflow](../.github/workflows/sandbox.yml) owns real-kernel and packed-distribution portability; the real-API workflow is manual-only and runs `pnpm run test:e2e` when credentials are intentionally supplied. See [scripts/run-gates.ts](../scripts/run-gates.ts) and the workflow files for the current gate and job inventory.
 
 ### Daily commands
 

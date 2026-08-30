@@ -8,40 +8,23 @@ Status: implemented
 
 根据策略，harness 高度依赖真实 API 测试：[docs/testing.md](../../../../docs/testing.zh.md) 指出，无密钥套件证明的是管线，而非产品；[ACP（Agent Client Protocol）inject 事故复盘（postmortem）](../../../../docs/postmortem/0001-acp-default-export-drops-inject.zh.md)则是常设证据——178 项无密钥测试保持绿色时，真实 ACP 客户端会话却立即崩溃。真实 API e2e 套件（`pnpm run test:e2e`，即 `*.e2e.ts` 文件）的存在正是为了弥合这一缺口：它针对线上 DeepSeek API 驱动 agent（智能体）——真实模型调用、真实 bash 工具、多轮次、恢复、ACP-over-stdio。
 
-默认门禁（[.github/workflows/ci.yml](../../../../.github/workflows/ci.yml)）刻意无密钥：不携带 secret，可供 fork 运行。`test:e2e` 在无密钥时自动跳过（`describe.skipIf(!process.env.DEEPSEEK_API_KEY)`），因此将其加入该工作流只会报绿而不会真正执行真实套件。要让真实 API 覆盖率成为合并信号，需要一个独立的、携带 secret 的工作流。
+默认的 [Desktop CI 工作流](../../../../.github/workflows/desktop-ci.yml)刻意无密钥：不携带 secret，并面向 PR 与上游同步分支运行。`test:e2e` 在无密钥时自动跳过（`describe.skipIf(!process.env.DEEPSEEK_API_KEY)`），因此将其加入该工作流只会报绿而不会真正执行真实套件。显式验证真实 API 时必须使用独立的携带 secret 的工作流。
 
 ## 决策
 
-一个与 ci.yml 分离的专用工作流 [.github/workflows/e2e.yml](../../../../.github/workflows/e2e.yml) 使用 repo secret 对外部 API 运行且仅运行 `pnpm run test:e2e`，仅在可信事件上触发，并带有一个 preflight 检查：将缺失的 secret 转化为明确的失败而非虚假的绿色。无密钥工作流保持独立，使可 fork 的质量门禁与消费 secret 的真实 API 门禁各自拥有不同的触发和凭证策略。
+专用工作流 [.github/workflows/e2e.yml](../../../../.github/workflows/e2e.yml) 使用仓库 secret 对外部 API 运行且仅运行 `pnpm run test:e2e`。该工作流只能手动派发：Desktop CI 保持无密钥且确定；需要这项信号时，维护者明确选择消耗 API 配额、依赖外部服务并使用凭据。
 
-### 独立工作流，而非 ci.yml 中的一个 job
+### 独立工作流，而非 Desktop CI 中的 job
 
-ci.yml 的价值在于它无密钥、可 fork、始终为绿：任何贡献者（包括外部 fork）都能获得完整的无密钥信号，secret 不在爆炸半径内。在其中添加消费 secret 的 job 会将这个始终为绿的门禁耦合到凭证可用性和不同的触发策略上。将携带 secret 的工作放在独立文件中，隔离了 secret、触发和并发策略，并为 fork 保留了 ci.yml 的特性。不同的生命周期→不同的文件。
+Desktop CI 必须能在每个 PR 和上游同步分支上无凭据运行。加入消费 secret 的 job 会把必需的桌面信号耦合到凭据可用性和外部服务。将真实 API 工作放在独立文件中，可以隔离 secret、触发方式、并发策略与运行成本。生命周期不同，工作流也不同。
 
-### 约束不是成本，而是可靠性
+### 触发条件：仅显式派发
 
-内部推理（inference）成本不是限制因素，因此工作流针对覆盖面和信号优化。它会在多种触发条件和每个受信任 PR（Pull Request）上运行所有匹配的 `*.e2e.ts` 文件，以落实 [docs/testing.md](../../../../docs/testing.zh.md) 的有密钥策略。
-
-### 触发条件：仅限可信事件
-
-`workflow_dispatch` + `push` 到 `main`/`master` + 每夜 `schedule`（`17 0 * * *`，即北京时间 08:17）+ `pull_request`。push 提供合并后信号；schedule 捕捉外部 API 漂移；dispatch 是手动逃生通道；可信 PR 获得合并前门禁。该合并前信号有意接受 § 安全性中描述的更大密钥暴露面。
-
-### 不可信 PR 的门禁
-
-GitHub 对两类 PR 扣留 repo secret：来自 **fork** 的 PR，以及 **Dependabot** PR（同仓库分支，`head.repo.fork == false`，但 secret 仍被扣留）。一个 job 级 `if:` 对两者都跳过整个 job：
-
-```
-github.event_name != 'pull_request'
-  || !(github.event.pull_request.head.repo.fork || github.event.pull_request.user.login == 'dependabot[bot]')
-```
-
-Dependabot 子句基于 PR **作者**（`pull_request.user.login`）而非 `github.actor`（运行触发者）：维护者重新打开或重跑 Dependabot PR 时，`github.actor` 会变成人类，但该 PR 仍然无密钥；基于作者的判断在这种情况下依然正确。被 **job 级** `if:` 跳过的 job 报告为*成功*检查（不同于工作流/触发级跳过会保持 pending），因此如果需要将此工作流标记为 required status check 也是安全的——fork/Dependabot PR 的跳过但绿色的检查不会阻塞合并。
-
-该门禁是一个*干净跳过的便利措施*，而非 secret 的安全边界（见 § 安全性——边界是 GitHub 自身在 `pull_request` 下对 fork 的 secret 扣留机制）。没有该门禁，fork 仍然无法读取密钥；只是会遇到令人困惑的 preflight 硬失败并浪费计算资源。
+`workflow_dispatch` 是唯一触发器。push、pull request 和定时事件不会自动消耗配额，也不会让缺失 secret 成为日常红灯。需要验证 provider 行为时，维护者手动派发，并把该结果与无密钥桌面门禁分开判断。
 
 ### Preflight：明确失败，绝不虚假报绿
 
-由于 job 仅在 secret 应当存在的可信事件上运行，preflight 是一个无条件的存在性检查：密钥为空→`exit 1` 并附带 `::error::` 注解指明需要配置的 secret 名称。这是让自跳过套件可以安全地作为门禁的关键。没有它，被删除/重命名/错误配置的 secret 会让 `test:e2e` 跳过所有真实套件并报告全绿——整个安全网的静默退化。该守卫将「secret 缺失」从不可见的虚假通过转化为可见的失败。（其正确性已在实际中验证：secret 存在之前的运行恰好在此步骤失败。）
+e2e 套件在无密钥时会自行跳过，因此手动运行会无条件检查 secret 是否存在：密钥为空时以 `::error::` 注解指明 `DEEPSEEK_API_KEY_EXTERNAL` 并退出。这会把凭据缺失或配置错误转化为可见失败，而不是全部跳过后的虚假通过。
 
 ### Secret 映射与卫生
 

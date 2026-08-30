@@ -5,9 +5,8 @@
 # the tag names this tree's root version, and the github-pages environment
 # repeats that restriction as a deployment tag policy with required reviewers.
 #
-# The build signal does not depend on this workflow. Every pull request builds
-# the production site through `check:ci:static`, and ci-master.yml builds it
-# again on master.
+# Documentation validation belongs to Desktop CI; this workflow only publishes
+# an explicitly selected desktop release snapshot.
 name: Deploy documentation
 
 on:

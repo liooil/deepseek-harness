@@ -1,15 +1,12 @@
-# Sandbox CI: the keyless real-kernel confinement proofs. This master-only
-# reference stays outside the pull-request verdict; rationale lives in
-# .agents/notes/implemented/process/2026-07-21-serial-cross-platform-ci-reference.md.
-# A separate workflow from ci.yml because the axis is different — these jobs
-# fan out over OS×runner (kernel capabilities), not node versions. The Landlock
-# launcher is built from native/landlock-run on each Landlock leg and installed
-# from locally packed workspace artifacts; no registry publication is involved.
+# Cross-platform confinement proofs for the desktop runtime. The matrix covers
+# bwrap, both shipped Landlock architectures, macOS Seatbelt, and the packed
+# distribution path used by standalone desktop builds.
 name: Sandbox
 
 on:
   push:
     branches: [master]
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -31,8 +28,8 @@ jobs:
   # rung; Landlock twice, once per architecture, each confining through the
   # locally built launcher), Seatbelt on macOS (sandbox-exec ships with
   # the OS). One node
-  # version only: kernel confinement does not vary by node, and ci.yml's
-  # node matrix already covers the node axis.
+  # version only: kernel confinement does not vary by Node, while Desktop CI
+  # owns the repository and desktop-build checks.
   #
   # The e2e files self-skip where their runner is absent, so a leg that lost
   # its runner (no bwrap, kernel without Landlock, macOS without

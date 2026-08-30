@@ -124,7 +124,7 @@ vendor manifest 守卫检查 `vendor/*/src` 下的改动是否连同对应的 `v
 
 ### CI 门禁
 
-keyless [CI 工作流](../.github/workflows/ci.yml) 将独立门禁分组到若干宽粒度 lane，并在受支持的 Node 版本上运行一组较小的兼容性检查。产物消费方在各自 lane 内等待一次 build。单独的真实 API 工作流按其配置的 worker 上限运行 `pnpm run test:e2e`。当前门禁和 job 清单以 [scripts/run-gates.ts](../scripts/run-gates.ts) 和工作流文件为准。
+无密钥的 [Desktop CI 工作流](../.github/workflows/desktop-ci.yml)会运行仓库策略、类型、hygiene、文档与桌面集成检查，并在每个待验证 ref 上构建和冒烟测试 Linux x64。推送到 master 时还会构建和冒烟测试 Windows x64 与 macOS arm64。独立的 [Sandbox 工作流](../.github/workflows/sandbox.yml)负责真实内核与打包分发的跨平台验证；真实 API 工作流仅允许手动派发，并在明确提供凭据时运行 `pnpm run test:e2e`。当前门禁和 job 清单以 [scripts/run-gates.ts](../scripts/run-gates.ts) 和工作流文件为准。
 
 ### 日常命令
 

@@ -16,6 +16,8 @@ Status: implemented
 
 README 与贡献者文档会将最终用户指向桌面 GitHub Release。Python SDK 与运行时 wheel 包明确标为内部产物，而本地与 CI 的打包安装检查继续验证支持桌面构建的源码和二进制载荷。
 
+公开仓库命名为 `deepseek-harness-desktop`，使其下游分发职责不会与上游源码仓库混淆。默认 CI 仅覆盖桌面相关能力：静态仓库门禁、原生桌面冒烟测试、sandbox 跨平台验证和六目标发布。上游包发布、组织 runner 演练、预览部署、Issue 自动化、Python 可执行文件发布以及自动真实 API 运行均不属于此 fork 的 CI 职责。维护者提供凭据时，仍可手动派发真实 API E2E。
+
 ## Alternatives considered
 
 **继续私有或公开发布工作区包。** 不采用，因为此 fork 不承诺包消费者；私有发布仍需要注册表凭据和发布恢复机制，公开发布则会产生桌面可执行文件已经包含的 API 面。
