@@ -15,7 +15,7 @@
 
 `Release (desktop)` GitHub Actions 工作流会在原生托管 runner 上构建 `dsh-desktop-{linux,windows,macos}-{x64,arm64}`。手动运行会将每个可执行文件分别保留为产物。发布运行只接受与仓库版本完全一致的 `desktop-v<repository-version>` 标签；它会检查六个文件全部存在、记录 `SHA256SUMS`、通过 GitHub Release 草稿上传，并在所有文件上传成功后公开 Release。
 
-首次执行会启动服务的命令时，程序会校验嵌入的数据归档，并将其解压到按内容寻址、仅属主可访问的用户缓存中。归档只包含必须以真实文件存在的包清单、profile、客户端 bundle 和原生资源；可执行 JavaScript 与 DSH 插件注册表仍编译在单文件内。完整解压结果会被复用。解压过程拒绝不安全的归档路径，并通过原子重命名发布新的缓存目录，因此并发启动不会使用不完整的数据。
+包清单、随附 profile、客户端 bundle 与静态资源位于可执行文件内部的 Bun 只读虚拟文件系统（VFS）中。启动服务时会直接读取这些内容：程序不会创建应用运行时缓存，也不会解压归档。目标平台的 libvips 动态库与 ripgrep 可执行文件是操作系统原生加载器无法从该 VFS 使用的仅有资源；桌面宿主只在首次图像或搜索操作需要时，才把相应文件复制到进程私有临时目录，并在有序关闭期间于原生句柄允许时删除该目录。`DSH_HOME` 下的 profile、设置、会话与附件仍是有意保存的用户数据，并非解压出的应用文件。
 
 ## 从源码运行
 
@@ -46,7 +46,7 @@ Windows 和 Linux 默认使用 `webview`。macOS 默认使用 `browser`，因为
 
 ## 生命周期
 
-启动器会在自身进程内运行 Cordis composition 与 HTTP 服务，并把日志输出到终端。关闭受管窗口会 dispose 该 composition；进程内服务关闭也会关闭窗口。`SIGINT` 和 `SIGTERM` 同样会 dispose 服务并关闭窗口。
+启动器会直接在自身 Bun 进程内运行 Cordis composition 与 HTTP 服务，不会监管第二个 DSH 或 Node host。关闭受管窗口会 dispose 该 composition；进程内服务关闭也会关闭窗口。`SIGINT` 和 `SIGTERM` 同样会 dispose 服务并关闭窗口。
 
 ## 已知限制和延期工作
 

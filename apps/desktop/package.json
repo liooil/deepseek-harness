@@ -27,7 +27,6 @@
     "@deepseek-ai/dsh-code-runtime-worker-thread": "workspace:^",
     "@deepseek-ai/dsh-tool-fs-search": "workspace:^",
     "@deepseek-ai/dsh-workflow-worker-thread": "workspace:^",
-    "@zip.js/zip.js": "^2.8.26",
     "bundesk": "^0.3.0",
     "sharp": "^0.35.3"
   },

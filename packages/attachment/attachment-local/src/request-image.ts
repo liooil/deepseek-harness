@@ -3,7 +3,8 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
-import sharp, { type Sharp } from 'sharp'
+import type sharp from 'sharp'
+import type { Sharp } from 'sharp'
 import { AttachmentError, ImageVariantId, requestImageDimensions } from '@deepseek-ai/dsh-attachment'
 import type {
   ImageMediaType,
@@ -19,7 +20,7 @@ import {
   encodingLadder,
   isExhaustedEncoding,
 } from './encoding.ts'
-import { detectImage, encodedAlphaIsCompatible, probeImage } from './image.ts'
+import { detectImage, encodedAlphaIsCompatible, probeImage, resolveSharp } from './image.ts'
 
 /** Transform version included in every cache and upload-index identity. */
 export const REQUEST_IMAGE_TRANSFORM_VERSION = 'request-image-v5'
@@ -80,13 +81,13 @@ export function requestImageVariantId(
   return ImageVariantId(`sha256:${digest(descriptor(attachment, policy))}`)
 }
 
-function pipeline(attachment: StoredImageAttachment, width: number, height: number): Sharp {
-  return sourcePipeline(attachment)
+function pipeline(factory: typeof sharp, attachment: StoredImageAttachment, width: number, height: number): Sharp {
+  return sourcePipeline(factory, attachment)
     .resize({ width, height, fit: 'inside', withoutEnlargement: true })
 }
 
-function sourcePipeline(attachment: StoredImageAttachment): Sharp {
-  return sharp(attachment.data, { failOn: 'error', limitInputPixels: false }).toColourspace('srgb')
+function sourcePipeline(factory: typeof sharp, attachment: StoredImageAttachment): Sharp {
+  return factory(attachment.data, { failOn: 'error', limitInputPixels: false }).toColourspace('srgb')
 }
 
 async function createRequestImage(
@@ -105,8 +106,9 @@ async function createRequestImage(
       height: attachment.ref.height,
     }
   }
+  const sharp = await resolveSharp()
   const encodedVersion = await encodeFirstWithinLimit(
-    encodingLadder(pipeline(attachment, dimensions.width, dimensions.height), hasAlpha),
+    encodingLadder(pipeline(sharp, attachment, dimensions.width, dimensions.height), hasAlpha),
     policy.maxBytes,
   )
   return isExhaustedEncoding(encodedVersion) ? encodedVersion.smallest : encodedVersion

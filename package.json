@@ -162,7 +162,6 @@
     "@types/spdx-expression-parse": "^4.0.0",
     "@vitest/coverage-v8": "^4.1.8",
     "@yarnpkg/cli-dist": "4.17.1",
-    "@zip.js/zip.js": "^2.8.26",
     "bundesk": "^0.3.0",
     "eslint-plugin-sonarjs": "^4.1.0",
     "execa": "^10.0.0",

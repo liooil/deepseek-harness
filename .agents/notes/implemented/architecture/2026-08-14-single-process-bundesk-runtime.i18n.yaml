@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-08-14-single-process-bundesk-runtime.md
-2026-08-14-single-process-bundesk-runtime.md: f1d6c4b19f73f192f7ab32601499900a26657274
-2026-08-14-single-process-bundesk-runtime.zh.md: 9b66a913eb60b15c17722b2d5c4d747a4c97b135
+2026-08-14-single-process-bundesk-runtime.md: aa2d3d37922977bc919d3b8237067ec70cb780ff
+2026-08-14-single-process-bundesk-runtime.zh.md: 0f41b5e0d82fa736fa23275ae24a20236a857b35

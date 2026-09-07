@@ -1,19 +1,16 @@
 /** Build one native, single-file DeepSeek Harness desktop executable. */
 
 import { spawn } from 'node:child_process'
-import { createHash } from 'node:crypto'
 import { existsSync, globSync, statSync } from 'node:fs'
 import { chmod, cp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { join, relative, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { parseArgs } from 'node:util'
-import { BlobReader, BlobWriter, ZipWriter } from '@zip.js/zip.js'
 
 const root = resolve(import.meta.dirname, '..')
 const OUT_DIR = resolve(root, 'dist-desktop')
 const GENERATED_DIR = resolve(root, 'apps/desktop/generated')
-const GENERATED_ARCHIVE = join(GENERATED_DIR, 'runtime.zip')
 const GENERATED_PLUGIN_REGISTRY = join(GENERATED_DIR, 'plugin-registry.ts')
 const CLI_PACKAGE = '@deepseek-ai/dsh'
 
@@ -152,8 +149,7 @@ class DesktopExecutableBuild {
     await this.generateSharpRuntime()
     await this.generateWorkerBundles()
     await this.stageRuntimeData()
-    const runtimeSha256 = await this.createRuntimeArchive()
-    await this.compile(runtimeSha256)
+    await this.compile()
   }
 
   private async generateSharpRuntime(): Promise<void> {
@@ -189,8 +185,8 @@ class DesktopExecutableBuild {
   /**
    * Keep only files that compiled plugins still consume as data. Server code
    * and ordinary npm dependencies are already in the Bun executable; copying
-   * the whole deployed node_modules would duplicate that graph and make first
-   * launch expand tens of thousands of files in memory.
+   * the whole deployed node_modules would duplicate that graph in the
+   * executable's read-only asset tree.
    */
   private async stageRuntimeData(): Promise<void> {
     await rm(this.stagingRoot, { recursive: true, force: true })
@@ -201,9 +197,6 @@ class DesktopExecutableBuild {
       await cp(source, destination, { recursive: statSync(source).isDirectory(), dereference: true })
     }
     const packageRelative = (name: string): string => join('node_modules', ...name.split('/'))
-    const copyPackage = async (name: string): Promise<void> => {
-      await copyFrom(resolve(root, 'node_modules/.pnpm/node_modules', ...name.split('/')), packageRelative(name))
-    }
 
     for (const name of this.workspaceClosure) {
       const manifest = this.workspaceManifests.get(name)
@@ -227,20 +220,25 @@ class DesktopExecutableBuild {
       if (name === '@deepseek-ai/dsh-skill-badge') await copyWorkspacePath('assets')
     }
 
-    // Native/runtime-resolved packages cannot live inside Bun's virtual FS.
-    for (const name of ['sharp', '@img/colour', 'detect-libc', 'semver', '@vscode/ripgrep']) {
-      await copyPackage(name)
-    }
     const sharpPlatform = this.cli.target.platform === 'windows' ? 'win32' : this.cli.target.platform === 'macos' ? 'darwin' : 'linux'
-    await copyPackage(`@img/sharp-${sharpPlatform}-${this.cli.target.arch}`)
-    if (this.cli.target.platform !== 'windows') {
-      await copyPackage(`@img/sharp-libvips-${sharpPlatform}-${this.cli.target.arch}`)
-    }
-    await copyPackage(`@vscode/ripgrep-${sharpPlatform}-${this.cli.target.arch}`)
-    if (this.cli.target.platform === 'windows') {
-      await copyPackage('koffi')
-      await copyPackage(`@koromix/koffi-win32-${this.cli.target.arch}`)
-    }
+    const sharpNativePackage = this.cli.target.platform === 'windows'
+      ? `@img/sharp-${sharpPlatform}-${this.cli.target.arch}`
+      : `@img/sharp-libvips-${sharpPlatform}-${this.cli.target.arch}`
+    await copyFrom(
+      resolve(root, 'node_modules/.pnpm/node_modules', ...sharpNativePackage.split('/'), 'lib'),
+      join('native', 'sharp'),
+    )
+    await copyFrom(
+      resolve(
+        root,
+        'node_modules/.pnpm/node_modules',
+        '@vscode',
+        `ripgrep-${sharpPlatform}-${this.cli.target.arch}`,
+        'bin',
+        this.cli.target.platform === 'windows' ? 'rg.exe' : 'rg',
+      ),
+      join('native', this.cli.target.platform === 'windows' ? 'rg.exe' : 'rg'),
+    )
 
     const files = await listFiles(this.stagingRoot)
     console.log(`build-desktop-executable: staged runtime data in ${files.length} files`)
@@ -356,28 +354,7 @@ class DesktopExecutableBuild {
     console.log(`build-desktop-executable: generated ${specifiers.size}-plugin compiled registry`)
   }
 
-  private async createRuntimeArchive(): Promise<string> {
-    await mkdir(GENERATED_DIR, { recursive: true })
-    const blobWriter = new BlobWriter('application/zip')
-    const writer = new ZipWriter(blobWriter, { level: 6 })
-    for (const path of await listFiles(this.stagingRoot)) {
-      const name = relative(this.stagingRoot, path).split(sep).join('/')
-      const mode = statSync(path).mode
-      const bytes = Uint8Array.from(await readFile(path))
-      await writer.add(name, new BlobReader(new Blob([bytes])), {
-        executable: (mode & 0o111) !== 0,
-        lastModDate: new Date('1980-01-01T00:00:00.000Z'),
-      })
-    }
-    const archive = await writer.close()
-    const archiveBytes = new Uint8Array(await archive.arrayBuffer())
-    await writeFile(GENERATED_ARCHIVE, archiveBytes)
-    const sha256 = createHash('sha256').update(archiveBytes).digest('hex')
-    console.log(`build-desktop-executable: runtime archive ${formatSize(archive.size)} sha256=${sha256}`)
-    return sha256
-  }
-
-  private async compile(runtimeSha256: string): Promise<void> {
+  private async compile(): Promise<void> {
     const version = (JSON.parse(await readFile(resolve(root, 'package.json'), 'utf8')) as { version: string }).version
     const require = createRequire(resolve(root, 'apps/desktop/package.json'))
     const bundeskEntry = require.resolve('bundesk')
@@ -392,10 +369,13 @@ class DesktopExecutableBuild {
       minify: true,
       plugins: [this.sharpBindingPlugin(), this.koffiBindingPlugin()],
       define: {
-        DSH_DESKTOP_RUNTIME_SHA256: JSON.stringify(runtimeSha256),
         DSH_DESKTOP_VERSION: JSON.stringify(version),
       },
-      compile: { autoloadDotenv: false, autoloadBunfig: false },
+      compile: {
+        assets: [relative(root, this.dshRoot)],
+        autoloadDotenv: false,
+        autoloadBunfig: false,
+      },
       ...(this.cli.target.platform === 'windows'
         ? {
           windows: {
@@ -434,14 +414,28 @@ class DesktopExecutableBuild {
   }
 
   private koffiBindingPlugin(): BunBuildPlugin {
-    const nativePackageModule = resolve(root, 'apps/desktop/src/native-package.ts')
+    const platform = this.cli.target.platform === 'windows'
+      ? 'win32'
+      : this.cli.target.platform === 'macos' ? 'darwin' : 'linux'
+    const packageRoot = resolve(
+      root,
+      'node_modules/.pnpm/node_modules',
+      '@koromix',
+      `koffi-${platform}-${this.cli.target.arch}`,
+    )
+    const candidates = globSync('*/koffi.node', { cwd: packageRoot }).sort()
+    const preferred = platform === 'linux'
+      ? candidates.find(path => path.startsWith('linux_'))
+      : candidates[0]
+    if (preferred === undefined) throw new Error(`build-desktop-executable: no Koffi addon found in ${packageRoot}`)
+    const addonPath = resolve(packageRoot, preferred)
     return {
       name: 'dsh-desktop-koffi-binding',
       setup(builder) {
         builder.onLoad({ filter: /[/\\]koffi[/\\]index\.(?:c?js)$/ }, () => ({
           contents: [
-            `import { loadDesktopNativePackage } from ${JSON.stringify(nativePackageModule)}`,
-            "export default loadDesktopNativePackage('koffi')",
+            `import binding from ${JSON.stringify(addonPath)}`,
+            'export default binding',
             '',
           ].join('\n'),
           loader: 'js',

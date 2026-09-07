@@ -77,6 +77,7 @@ kind: "package-reference"
 - **持久性靠 fsync 链，而非存在性。** 当目录项从未到达存储时，仅同步文件无法在崩溃后存活，因此写入路径会在引用可能到达会话检查点前，把每个祖先条目同步到进程已验证的边界。
 - **一次规范化，按路由投影。** 准入持久保存一份提供方无关的规范化附件；请求投影派生确定性变体而不改写持久历史。
 - **惰性 alpha 路由编码。** 带 alpha 的图片使用 WebP，不透明图片使用 JPEG；质量候选按 85/75/60 顺序运行，没有候选满足编码字节目标时保留最小输出。
+- **在图像操作时加载原生解码器。** 插件 composition 不会 import Sharp 运行时 binding。默认 loader 会在解码或变换图像时解析已安装包；封闭宿主则可配置一个先准备其目标平台原生库的 loader。
 - **限制是写入时策略。** 字节、总像素与单边尺寸限制只约束准入，因此之后收紧它们绝不会让已接纳的历史不可读。
 
 ### 写入与读取路径
@@ -95,7 +96,7 @@ kind: "package-reference"
 | [`src/store.ts`](src/store.ts) | 内容寻址写入与校验读取：暂存、硬链接发布、fsync 链、摘要校验 |
 | [`src/normalization.ts`](src/normalization.ts) + [`src/encoding.ts`](src/encoding.ts) | 提供方无关的规范化与有界格式／质量候选 |
 | [`src/request-image.ts`](src/request-image.ts) | 路由专用请求变换、缓存身份与 singleflight |
-| [`src/image.ts`](src/image.ts) | 完整光栅解码与元数据校验 |
+| [`src/image.ts`](src/image.ts) | 延迟加载 Sharp、完整光栅解码与元数据校验 |
 | [`src/invariant.ts`](src/invariant.ts) | 不变式伴生插件（无运行时不变式；不可变写入与校验读取在后端边界直接强制） |
 
 </details>

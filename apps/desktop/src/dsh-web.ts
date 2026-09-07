@@ -9,13 +9,18 @@ import { detectImage } from '@deepseek-ai/dsh-attachment-local/src/image.ts'
 import { configureRipgrepPath, resolveRgPath } from '@deepseek-ai/dsh-tool-fs-search/src/search-core.ts'
 import { verifyWorkflowWorkerEntry } from '@deepseek-ai/dsh-workflow-worker-thread'
 import { dlopen, FFIType } from 'bun:ffi'
+import {
+  disposeEmbeddedNativeRuntime,
+  type EmbeddedDshRuntime,
+  embeddedNativeRuntimeWasMaterialized,
+  materializeEmbeddedNativePath,
+} from './embedded-runtime.ts'
 import { shouldPreloadSharpLibrary } from './native-library.ts'
-import { configureDesktopNativePackageAnchor } from './native-package.ts'
-import { type EmbeddedDshRuntime, materializeDshRuntime } from './runtime-cache.ts'
 
 let embeddedRuntime: EmbeddedDshRuntime | undefined
 let compiledPluginImporter: ((name: string) => unknown) | undefined
 let sharpNativeLibrary: ReturnType<typeof dlopen> | undefined
+let prepareSharpPromise: Promise<void> | undefined
 let sourceWorkspacePackages: Promise<Map<string, { root: string; manifest: WorkspaceManifest }>> | undefined
 
 interface WorkspaceManifest {
@@ -45,53 +50,57 @@ export function embeddedDshRuntimeVersion(): string | undefined {
   return embeddedRuntime?.version
 }
 
-async function resolveRuntime(): Promise<{
+function resolveRuntime(): {
   installAnchor: string
   shippedPresetRoot: string
   runtimePaths?: DshRuntimePaths
-}> {
-  const materialized = embeddedRuntime === undefined ? undefined : await materializeDshRuntime(embeddedRuntime)
-  if (materialized?.extracted) {
-    console.info(`dsh-desktop: extracted embedded runtime data to ${materialized.root}`)
-  }
-  const installAnchor = materialized?.installAnchor
+} {
+  const installAnchor = embeddedRuntime === undefined
+    ? undefined
+    : join(embeddedRuntime.root, 'node_modules', '@deepseek-ai', 'dsh', 'package.json')
+  const resolvedInstallAnchor = installAnchor
     ?? createRequire(import.meta.url).resolve('@deepseek-ai/dsh/package.json')
-  const require = createRequire(installAnchor)
-  const packageRoot = dirname(installAnchor)
-  if (materialized !== undefined) {
-    configureDesktopNativePackageAnchor(installAnchor)
-    const platform = process.platform === 'win32' ? 'win32' : process.platform === 'darwin' ? 'darwin' : 'linux'
-    const nativePackage = process.platform === 'win32'
-      ? `sharp-${platform}-${process.arch}`
-      : `sharp-libvips-${platform}-${process.arch}`
-    const nativeLibraryPath = resolve(packageRoot, '../..', '@img', nativePackage, 'lib')
-    const key = process.platform === 'win32' ? 'PATH' : process.platform === 'darwin' ? 'DYLD_LIBRARY_PATH' : 'LD_LIBRARY_PATH'
-    process.env[key] = [nativeLibraryPath, process.env[key]].filter(Boolean).join(delimiter)
-    const libraryName = (await readdir(nativeLibraryPath)).find(name => /vips.*\.(?:so(?:\.|$)|dylib$|dll$)/i.test(name))
-    if (libraryName === undefined) throw new Error(`dsh-desktop: libvips library is missing from ${nativeLibraryPath}`)
-    if (shouldPreloadSharpLibrary(process.platform)) {
-      sharpNativeLibrary ??= dlopen(join(nativeLibraryPath, libraryName), {
-        vips_init: { args: [FFIType.cstring], returns: FFIType.i32 },
-      })
-    }
-    const rgPlatform = process.platform === 'win32' ? 'win32' : process.platform
-    configureRipgrepPath(resolve(
-      packageRoot,
-      '../..',
-      '@vscode',
-      `ripgrep-${rgPlatform}-${process.arch}`,
-      'bin',
-      process.platform === 'win32' ? 'rg.exe' : 'rg',
+  const packageRoot = dirname(resolvedInstallAnchor)
+  const nodeModulesRoot = resolve(packageRoot, '../..')
+  const runtime = embeddedRuntime
+  if (runtime !== undefined) {
+    configureRipgrepPath(() => materializeEmbeddedNativePath(
+      runtime,
+      join('native', process.platform === 'win32' ? 'rg.exe' : 'rg'),
+      true,
     ))
   }
   return {
-    installAnchor,
+    installAnchor: resolvedInstallAnchor,
     shippedPresetRoot: join(packageRoot, 'config', 'agent-presets'),
-    ...(materialized === undefined ? {} : { runtimePaths: {
-      resolvePackageJson: packageName => require.resolve(`${packageName}/package.json`),
-      resolvePackageExport: (packageName, subpath) => require.resolve(`${packageName}/${subpath}`),
-      harnessSourceRoot: materialized.root,
+    ...(embeddedRuntime === undefined ? {} : { runtimePaths: {
+      resolvePackageJson: packageName => join(nodeModulesRoot, ...packageName.split('/'), 'package.json'),
+      resolvePackageExport: (packageName, subpath) => join(nodeModulesRoot, ...packageName.split('/'), subpath),
+      harnessSourceRoot: dirname(embeddedRuntime.root),
     } }),
+  }
+}
+
+/**
+ * Prepare Sharp's target-native dependencies when the first image operation needs them.
+ * @returns settlement after the native library path is ready.
+ */
+export function prepareEmbeddedSharpRuntime(): Promise<void> {
+  prepareSharpPromise ??= prepareSharp()
+  return prepareSharpPromise
+}
+
+async function prepareSharp(): Promise<void> {
+  if (embeddedRuntime === undefined) return
+  const nativeLibraryPath = await materializeEmbeddedNativePath(embeddedRuntime, join('native', 'sharp'))
+  const key = process.platform === 'win32' ? 'PATH' : process.platform === 'darwin' ? 'DYLD_LIBRARY_PATH' : 'LD_LIBRARY_PATH'
+  process.env[key] = [nativeLibraryPath, process.env[key]].filter(Boolean).join(delimiter)
+  const libraryName = (await readdir(nativeLibraryPath)).find(name => /vips.*\.(?:so(?:\.|$)|dylib$|dll$)/i.test(name))
+  if (libraryName === undefined) throw new Error(`dsh-desktop: libvips library is missing from ${nativeLibraryPath}`)
+  if (shouldPreloadSharpLibrary(process.platform)) {
+    sharpNativeLibrary ??= dlopen(join(nativeLibraryPath, libraryName), {
+      vips_init: { args: [FFIType.cstring], returns: FFIType.i32 },
+    })
   }
 }
 
@@ -147,7 +156,7 @@ async function importSourcePlugin(specifier: string): Promise<unknown> {
 
 export async function startDshWeb(options: { cwd: string; port: number }): Promise<DshWebSession> {
   process.chdir(resolve(options.cwd))
-  const runtime = await resolveRuntime()
+  const runtime = resolveRuntime()
   const importer = compiledPluginImporter ?? importSourcePlugin
   const { ctx, shutdown } = await runProfile({
     environment: loadLayeredEnv('dsh'),
@@ -172,6 +181,11 @@ export async function startDshWeb(options: { cwd: string; port: number }): Promi
     throw new Error('dsh web started without a connection service')
   }
   const webUrl = new URL(connection.authenticatedUrl(`http://127.0.0.1:${String(webServer.port)}`))
+  if (embeddedNativeRuntimeWasMaterialized()) {
+    await ctx.fiber.dispose()
+    await disposeEmbeddedNativeRuntime()
+    throw new Error('dsh-desktop: startup materialized a native runtime asset')
+  }
 
   let exitCode: number | null = null
   let resolveExited!: (code: number) => void
@@ -246,7 +260,11 @@ export async function startDshWeb(options: { cwd: string; port: number }): Promi
       }
     },
     stop() {
-      stopPromise ??= shutdown.shutdown(0).then(async () => exited)
+      stopPromise ??= shutdown.shutdown(0).then(async () => {
+        const code = await exited
+        await disposeEmbeddedNativeRuntime()
+        return code
+      })
       return stopPromise
     },
   }

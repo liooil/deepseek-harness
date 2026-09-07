@@ -77,6 +77,7 @@ This section explains the durability and verification design behind the storage,
 - **Durability by fsync chain, not existence.** A synced file alone does not survive a crash when its directory entry never reached storage, so the write path syncs every ancestor entry to a process-proven boundary before a reference can reach a session checkpoint.
 - **Normalize once, project per route.** Admission persists one provider-independent normalized attachment; request projection derives deterministic variants without rewriting durable history.
 - **Lazy alpha-routed encoding.** Alpha images use WebP and opaque images use JPEG; quality candidates run in 85/75/60 order, and the smallest output is retained when none meets the encoded-byte target.
+- **Load the native decoder at the image operation.** Plugin composition imports no Sharp runtime binding. The default loader resolves the installed package when an image is decoded or transformed, while a closed host may configure a loader that prepares its target-native library first.
 - **Limits are write-time policy.** Byte, total-pixel, and per-side dimension limits bind admission only, so tightening them later never makes admitted history unreadable.
 
 ### Write and read paths
@@ -95,7 +96,7 @@ Request versions live below `<DSH_HOME>/attachments/v1/request-images/`. `readIm
 | [`src/store.ts`](src/store.ts) | Content-addressed write and verified read: staging, hard-link publish, fsync chain, digest verification |
 | [`src/normalization.ts`](src/normalization.ts) + [`src/encoding.ts`](src/encoding.ts) | Provider-independent normalization and bounded format/quality candidates |
 | [`src/request-image.ts`](src/request-image.ts) | Route-specific request transforms, cache identity, and singleflight |
-| [`src/image.ts`](src/image.ts) | Full raster decode and metadata verification |
+| [`src/image.ts`](src/image.ts) | Lazy Sharp loading, full raster decode, and metadata verification |
 | [`src/invariant.ts`](src/invariant.ts) | Invariant companion (no runtime invariant; immutable writes and verified reads enforced at the backend boundary) |
 
 </details>

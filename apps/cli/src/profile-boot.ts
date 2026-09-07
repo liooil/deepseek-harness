@@ -208,7 +208,7 @@ export interface RunProfileOptions {
   watchPatches?: boolean
   /** Register process SIGINT/SIGTERM handlers for this invocation. */
   manageProcessSignals?: boolean
-  /** Filesystem resources extracted beside a compiled plugin graph. */
+  /** Filesystem resources mounted beside a compiled plugin graph. */
   runtimePaths?: DshRuntimePaths
 }
 

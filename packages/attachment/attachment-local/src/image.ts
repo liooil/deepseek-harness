@@ -57,6 +57,14 @@ let loadSharp: () => Promise<SharpFactory> = async () => {
 }
 
 /**
+ * Resolve the host-configured Sharp factory at the image operation boundary.
+ * @returns the usable Sharp export.
+ */
+export function resolveSharp(): Promise<SharpFactory> {
+  return loadSharp()
+}
+
+/**
  * Supply a packaged native-image loader without statically bundling Sharp's addon.
  * @param loader - lazy host-owned factory resolving the usable Sharp export.
  */
@@ -106,7 +114,7 @@ async function imageMetadata(image: Sharp): Promise<DetectedImage> {
  */
 export async function probeImage(data: Uint8Array): Promise<DetectedImage> {
   try {
-    const sharp = await loadSharp()
+    const sharp = await resolveSharp()
     return await imageMetadata(sharp(data, { failOn: 'error', limitInputPixels: false }))
   } catch (error) {
     if (error instanceof AttachmentError) throw error
@@ -130,7 +138,7 @@ export interface DecodedImageLimits {
  */
 export async function detectImage(data: Uint8Array, limits?: DecodedImageLimits): Promise<DetectedImage> {
   try {
-    const sharp = await loadSharp()
+    const sharp = await resolveSharp()
     const image = sharp(data, { failOn: 'error', limitInputPixels: false })
     const detected = await imageMetadata(image)
     if (limits?.maxPixels !== undefined && detected.width * detected.height > limits.maxPixels) {

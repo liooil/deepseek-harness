@@ -39,4 +39,16 @@ describe('lazy packaged-ripgrep resolution', () => {
     configureRipgrepPath('/runtime/native/rg')
     await expect(resolveRgPath()).resolves.toBe('/runtime/native/rg')
   })
+
+  it('runs a host-supplied resolver only on the first path request', async () => {
+    let calls = 0
+    configureRipgrepPath(async () => {
+      calls += 1
+      return '/runtime/materialized/rg'
+    })
+
+    await expect(resolveRgPath()).resolves.toBe('/runtime/materialized/rg')
+    await expect(resolveRgPath()).resolves.toBe('/runtime/materialized/rg')
+    expect(calls).toBe(1)
+  })
 })

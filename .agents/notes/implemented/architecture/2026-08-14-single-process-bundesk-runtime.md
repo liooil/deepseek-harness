@@ -16,7 +16,7 @@ Run the existing `web` profile inside the BunDesk executable's Bun process. The 
 
 Generate a closed static plugin registry during the desktop build. The registry covers packages named by shipped configuration, dynamically selectable directory-picker implementations, and every workspace package that exports `./typert`. Each registry arm uses a compile-visible import, so Bun includes plugin code in the executable even though Cordis still chooses the package by its runtime name. Direct source execution builds the equivalent workspace-name map from package manifests and imports source entries, with ordinary dynamic import as the fallback for external packages.
 
-Embed only data that must exist as real files: package manifests, Cordis profiles and presets, client bundles, skill badge assets, and target-native resources. Verify this archive and extract it into a content-addressed, owner-only cache using safe paths and atomic publication. Executable server and plugin JavaScript remains inside the standalone binary; the archive contains no Node runtime and no deployed `node_modules` JavaScript closure.
+Embed package manifests, Cordis profiles and presets, client bundles, and skill badge assets as a directory tree in Bun's read-only virtual filesystem. Existing `node:fs` consumers read those files in place, so the desktop has no runtime archive, extraction pass, or application-runtime cache. Executable server and plugin JavaScript remains compiled inside the standalone binary; the embedded directory contains no Node runtime and no deployed `node_modules` JavaScript closure. Target-native libvips and ripgrep files also live in the executable, but operating-system loaders require real paths: the host materializes either file into a process-owned temporary directory only when an image or search operation first needs it and removes that directory during orderly shutdown when native handles permit. Startup fails if composition materializes one of those native resources.
 
 Bundle the code-runtime and workflow worker entries separately and embed them as file assets named at standalone compile time. Their hosts accept configured entry URLs. This preserves real worker isolation without a second DSH host process. Node continues to use its published worker entries; Bun uses the embedded entries.
 
@@ -25,8 +25,8 @@ Provide focused host compatibility at the packages that own the affected capabil
 - SQLite providers select `bun:sqlite` under Bun and `node:sqlite` under Node.
 - The code runtime uses Bun's TypeScript transpiler, a heartbeat-based continuous-stall budget because Bun worker ELU is unimplemented, and nullable worker pipes. Node retains native type stripping and cumulative event-loop-utilization metering.
 - The local subprocess provider uses `Bun.Terminal` under Bun and lazily loads `node-pty` under Node.
-- The image provider accepts a configured Sharp loader. The target build statically embeds Sharp's addon, while startup preloads the extracted target libvips library.
-- The search provider accepts the extracted packaged-ripgrep path instead of discovering its optional platform package at runtime.
+- The image provider resolves every Sharp pipeline through one configured lazy loader. The target build statically embeds Sharp's addon and materializes and preloads target libvips at the first image operation.
+- The search provider accepts a host path or lazy path resolver. Desktop ripgrep materialization happens at the first search operation instead of composition startup.
 - Package metadata uses JSON imports where a runtime `createRequire` was only serving static data. Windows-only picker, ACL, and Koffi paths remain lazy and platform-gated.
 - Windows native integrations use Koffi 3.1.6 or newer and require Bun 1.4.0 or newer; Bun 1.3.14 crashes while finalizing Koffi after an otherwise successful shutdown.
 
@@ -42,6 +42,7 @@ Build six target-native single-file executables in GitHub Actions. Publication r
 - Replace Node with a second Bun `dsh web` process. This removed Node from the release but still violated the one-process requirement and retained supervision and cross-process lifecycle complexity.
 - Let the standalone executable dynamically import arbitrary extracted plugin JavaScript. Bun's compiled module graph cannot reliably load that unbundled workspace closure, and doing so would restore a large filesystem runtime with weaker build-time verification.
 - Embed the complete production `node_modules` tree as runtime data. Most files would be unnecessary because Bun already compiled their JavaScript, while native discovery and worker entry constraints would still need explicit handling.
+- Keep the reduced data tree in a verified self-extracting archive. Content addressing and atomic publication made the cache safe, but every first launch still copied hundreds of immutable application files out of the executable and left another installed runtime tree for later cleanup.
 - Reimplement the Web server or proxy it through a second Bun server. The existing profile already owns trusted-host validation, boot-state injection, static resources, and WebSocket transport; duplicating it would create a second behavioral source of truth.
 - Use Electron. It would bundle a Chromium runtime, duplicate the browser transport, and still require a separate decision about how the harness is hosted.
 
@@ -49,10 +50,10 @@ Build six target-native single-file executables in GitHub Actions. Publication r
 
 The release product is one executable with one BunDesk/Bun DSH host process and no Node host. Browser mode and tools that intentionally launch commands can still create external operating-system processes; those are consumers of the host, not another harness runtime.
 
-The shipped plugin set is intentionally closed. A custom profile may compose included plugins and extracted configuration, but it cannot load an arbitrary package installed after compilation; adding one requires a new desktop build and registry entry. Source and package-based CLI execution retain open filesystem module resolution.
+The shipped plugin set is intentionally closed. A custom profile may compose included plugins and embedded configuration, but it cannot load an arbitrary package installed after compilation; adding one requires a new desktop build and registry entry. Source and package-based CLI execution retain open filesystem module resolution.
 
 Target-native packages make the release build native rather than freely cross-compilable. The six-runner Actions matrix owns portability verification. WebView2 on Windows and WebKit2GTK plus a display server on Linux remain operating-system prerequisites. macOS artifacts are ad-hoc signed; trusted Apple Developer ID and Windows Authenticode signing remain credentialed follow-up work.
 
 Bun and Node have a few deliberately documented semantic differences. In particular, Bun's compute budget detects one continuous unresponsive interval rather than exact cumulative busy time across short bursts. The wall-clock ceiling remains the common backstop. Repository development still requires the supported Node version and Bun, while a release executable requires neither to be installed.
 
-The stronger compiled smoke test catches missing front-end resources, plugin composition failures, unavailable worker entries, native image linkage, missing ripgrep, and PTY startup in the produced binary. It does not replace interactive webview testing or the target-native CI matrix.
+The stronger compiled smoke test catches missing virtual-filesystem resources, launch-time native materialization, plugin composition failures, unavailable worker entries, native image linkage, missing ripgrep, and PTY startup in the produced binary. An isolated-cache run proves the executable creates no desktop runtime cache, and the interactive Linux process-tree check proves only the WebKit processes sit below the single DSH host. These checks do not replace the target-native CI matrix.

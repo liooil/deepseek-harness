@@ -15,7 +15,7 @@ This package is the BunDesk desktop launcher for DeepSeek Harness. Its release e
 
 The `Release (desktop)` GitHub Actions workflow builds `dsh-desktop-{linux,windows,macos}-{x64,arm64}` on native hosted runners. A manual run retains each executable as its own artifact. A publishing run accepts only the exact `desktop-v<repository-version>` tag, checks that all six files are present, records `SHA256SUMS`, uploads through a draft GitHub Release, and makes the release visible after every upload succeeds.
 
-The first command that starts the server verifies the embedded data archive and extracts it into a content-addressed, owner-only user cache. The archive contains package manifests, profiles, client bundles, and native resources needed as real files; executable JavaScript and the DSH plugin registry remain compiled into the single executable. Completed extractions are reused. Extraction rejects unsafe archive paths and publishes a new cache directory with an atomic rename, so concurrent starts cannot consume partial data.
+Package manifests, shipped profiles, client bundles, and static resources live in Bun's read-only virtual filesystem inside the executable. Starting the server reads them in place: it creates no application-runtime cache and extracts no archive. The target libvips library and ripgrep executable are the only resources that operating-system native loaders cannot consume from that virtual filesystem; the desktop host copies each into a process-owned temporary directory only when the first image or search operation needs it, then removes that directory during orderly shutdown when native handles permit. Profiles, settings, sessions, and attachments under `DSH_HOME` remain intentional user data, not extracted application files.
 
 ## Run from source
 
@@ -46,7 +46,7 @@ Windows and Linux default to `webview`. macOS defaults to `browser` because BunD
 
 ## Lifecycle
 
-The launcher runs the Cordis composition and HTTP server in its own process and streams their logs to its terminal. Closing a managed window disposes that composition; an in-process server shutdown closes the window. `SIGINT` and `SIGTERM` also dispose the server and close the window.
+The launcher runs the Cordis composition and HTTP server directly in its own Bun process; it does not supervise a second DSH or Node host. Closing a managed window disposes that composition; an in-process server shutdown closes the window. `SIGINT` and `SIGTERM` also dispose the server and close the window.
 
 ## Known Limitations and Deferred Work
 
